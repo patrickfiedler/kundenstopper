@@ -22,32 +22,50 @@ A Flask-based web application for displaying PDF files in a browser with automat
 - **PDF Rendering**: PDF.js (local copy)
 - **Storage**: Local filesystem
 
-## Installation
+## Quick Start
 
-1. **Clone or download the repository**
+### Automated Installation (Recommended)
 
-2. **Install Python dependencies**:
+```bash
+git clone https://github.com/parsnipsmoothie/kundenstopper.git
+cd kundenstopper
+./deploy.sh
+```
+
+The deployment script will guide you through the setup process interactively.
+
+### Manual Installation
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed installation instructions, including:
+- Manual setup steps
+- Systemd service configuration
+- Update procedures
+- Troubleshooting
+
+**Quick manual setup:**
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/parsnipsmoothie/kundenstopper.git
+   cd kundenstopper
+   ```
+
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Generate a password hash**:
+3. **Configure the application**
    ```bash
-   python3 generate_password_hash.py
-   ```
-
-   This will prompt you to enter a password and generate a bcrypt hash.
-
-4. **Create configuration file**:
-   ```bash
+   python3 generate_password_hash.py  # Generate password hash
    cp config.json.example config.json
+   # Edit config.json with your settings
    ```
 
-   Edit `config.json` and update:
-   - `admin_password_hash`: Use the hash generated in step 3
-   - `secret_key`: Change to a random secret string
-   - `port`: (Optional) Change the port if needed
-   - `admin_username`: (Optional) Change the admin username
+4. **Create uploads directory**
+   ```bash
+   mkdir uploads
+   ```
 
 ## Configuration
 
@@ -114,11 +132,19 @@ kundenstopper/
 ├── config.py                   # Configuration management
 ├── models.py                   # Database models and functions
 ├── requirements.txt            # Python dependencies
+├── deploy.sh                   # Automated deployment script
+├── update.sh                   # Automated update script
 ├── config.json                 # Configuration file (create from example)
 ├── config.json.example         # Example configuration
 ├── generate_password_hash.py   # Utility to generate password hashes
+├── kundenstopper.service       # Systemd service template
 ├── kundenstopper.db           # SQLite database (auto-created)
 ├── uploads/                    # PDF file storage
+├── README.md                   # Usage documentation
+├── DEPLOYMENT.md               # Deployment guide
+├── INSTALLATION.md             # Installation instructions (German)
+├── CLAUDE.md                   # Project guidance for Claude Code
+├── LICENSE                     # MIT License
 ├── static/
 │   ├── pdfjs/                 # PDF.js library files
 │   ├── css/                   # Custom CSS files
@@ -148,6 +174,24 @@ Tested with:
 - Firefox (recommended)
 - Chrome
 - Edge
+
+## Updating
+
+To update an existing installation to the latest version:
+
+```bash
+cd /path/to/kundenstopper
+./update.sh
+```
+
+The update script will:
+- Create a backup tag before updating
+- Pull the latest code from GitHub
+- Update dependencies if needed
+- Restart the service automatically
+- Provide rollback instructions if something goes wrong
+
+For more details, see [DEPLOYMENT.md](DEPLOYMENT.md#updating-an-existing-installation).
 
 ## Troubleshooting
 
