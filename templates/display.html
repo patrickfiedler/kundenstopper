@@ -298,9 +298,16 @@
                 video.onerror = function() { showError('Video konnte nicht geladen werden'); };
                 container.appendChild(video);
 
-            } else if (ct === 'youtube' || ct === 'url') {
+            } else if (ct === 'youtube') {
                 var iframe = document.createElement('iframe');
                 iframe.src = data.url;
+                iframe.allow = 'autoplay; fullscreen';
+                iframe.onload = function() { loadingDiv.style.display = 'none'; };
+                container.appendChild(iframe);
+
+            } else if (ct === 'url') {
+                var iframe = document.createElement('iframe');
+                iframe.src = '/proxy?url=' + encodeURIComponent(data.url);
                 iframe.allow = 'autoplay; fullscreen';
                 iframe.onload = function() { loadingDiv.style.display = 'none'; };
                 container.appendChild(iframe);
