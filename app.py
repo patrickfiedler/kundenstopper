@@ -272,8 +272,15 @@ def proxy():
     else:
         content = resp.content
 
-    # Forward headers, stripping those that block iframe embedding or conflict with Flask
-    skip = {'x-frame-options', 'transfer-encoding', 'content-encoding', 'content-length'}
+    # Forward headers, stripping hop-by-hop headers (forbidden in WSGI per PEP 3333)
+    # and headers that block iframe embedding or conflict with Flask response handling
+    skip = {
+        # Hop-by-hop (connection-layer, must not be forwarded)
+        'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+        'te', 'trailers', 'transfer-encoding', 'upgrade',
+        # Proxy-specific
+        'x-frame-options', 'content-encoding', 'content-length',
+    }
     headers = {}
     for key, value in resp.headers.items():
         k = key.lower()
