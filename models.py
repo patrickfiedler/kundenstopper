@@ -34,9 +34,16 @@ def init_db():
                 selected_media_id INTEGER NOT NULL DEFAULT 0,
                 cycle_interval INTEGER NOT NULL DEFAULT 10,
                 background_color TEXT NOT NULL DEFAULT '#ffffff',
-                progress_indicator TEXT NOT NULL DEFAULT 'progress'
+                progress_indicator TEXT NOT NULL DEFAULT 'progress',
+                video_fit TEXT NOT NULL DEFAULT 'contain'
             )
         ''')
+
+        # Migrate: add video_fit column if upgrading from older schema
+        try:
+            conn.execute("ALTER TABLE displays ADD COLUMN video_fit TEXT NOT NULL DEFAULT 'contain'")
+        except Exception:
+            pass  # Column already exists
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS media_items (
@@ -182,7 +189,7 @@ def create_display(name, slug, width, height):
 
 def update_display(display_id, **kwargs):
     allowed = {'name', 'width', 'height', 'selected_media_id',
-               'cycle_interval', 'background_color', 'progress_indicator'}
+               'cycle_interval', 'background_color', 'progress_indicator', 'video_fit'}
     fields = [(k, v) for k, v in kwargs.items() if k in allowed and v is not None]
     if not fields:
         return

@@ -131,10 +131,15 @@
         .display-card-header .display-meta a { color: #667eea; text-decoration: none; }
         .display-card-header .display-meta a:hover { text-decoration: underline; }
         .display-card-body { padding: 12px 16px; border-top: 1px solid #eee; }
-        .display-card-body .now-playing { font-size: 13px; color: #555; margin-bottom: 10px; }
-        .display-card-body .now-playing strong { color: #333; }
+        .display-card-body .now-playing { font-size: 13px; color: #555; margin-bottom: 10px; line-height: 1.6; }
+        .display-card-body .now-playing strong { color: #333; font-size: 15px; display: block; }
+        .display-card-body .now-playing .meta { color: #999; font-size: 12px; }
         .display-settings-panel { padding: 14px 16px; border-top: 1px solid #eee; background: #fafafa; display: none; }
         .display-settings-panel .form-row { margin-bottom: 10px; }
+
+        /* Active media row */
+        tr.is-active td { background: #f0fdf4 !important; }
+        tr.is-active td:first-child { border-left: 3px solid #28a745; padding-left: 9px; }
 
         /* Rename inline */
         .original-name { cursor: pointer; color: #667eea; }
@@ -145,6 +150,7 @@
 </head>
 <body>
 <div class="container">
+    {% set type_labels = {'pdf': 'PDF', 'image': 'Bild', 'video': 'Video', 'youtube': 'YouTube', 'url': 'Website'} %}
 
     <header>
         <h1>Kundenstopper Verwaltung</h1>
@@ -188,15 +194,17 @@
 
                 <div class="display-card-body">
                     <div class="now-playing">
-                        Zeigt gerade:
                         {% set current = display_current.get(d.id) %}
                         {% if current %}
-                            <strong>{{ current.original_name }}</strong>
-                            {% if d.selected_media_id == 0 %}
-                                <span style="color:#999;font-size:11px;">(neueste)</span>
-                            {% endif %}
+                            <strong>
+                                <span class="badge badge-{{ current.content_type }}" style="font-size:10px;vertical-align:middle;margin-right:5px;">{{ type_labels.get(current.content_type, current.content_type) }}</span>{{ current.original_name }}
+                            </strong>
+                            <span class="meta">
+                                {% if d.selected_media_id == 0 %}Automatisch (neuester Inhalt){% else %}Manuell ausgewählt{% endif %}
+                                &nbsp;·&nbsp;<a href="{{ url_for('display_by_slug', slug=d.slug) }}" target="_blank">Vorschau ↗</a>
+                            </span>
                         {% else %}
-                            <em style="color:#999;">Kein Inhalt</em>
+                            <strong style="color:#999;">Kein Inhalt vorhanden</strong>
                         {% endif %}
                     </div>
                     <div class="actions">
@@ -236,11 +244,18 @@
                                 <input type="color" name="background_color" value="{{ d.background_color }}" required>
                             </div>
                             <div class="form-group">
-                                <label>Fortschrittsanzeige</label>
+                                <label>Fortschrittsanzeige (PDF)</label>
                                 <select name="progress_indicator" required>
                                     <option value="progress"  {% if d.progress_indicator == 'progress'  %}selected{% endif %}>Fortschrittsbalken</option>
                                     <option value="countdown" {% if d.progress_indicator == 'countdown' %}selected{% endif %}>Countdown</option>
                                     <option value="none"      {% if d.progress_indicator == 'none'      %}selected{% endif %}>Keine</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Videoskalierung</label>
+                                <select name="video_fit" required>
+                                    <option value="contain" {% if d.video_fit == 'contain' %}selected{% endif %}>Letterbox (ganzes Bild)</option>
+                                    <option value="cover"   {% if d.video_fit == 'cover'   %}selected{% endif %}>Vollbild (beschnitten)</option>
                                 </select>
                             </div>
                         </div>
@@ -320,8 +335,6 @@
     </div>
 
     <!-- ===== MEDIA LIBRARY ===== -->
-    {% set type_labels = {'pdf': 'PDF', 'image': 'Bild', 'video': 'Video', 'youtube': 'YouTube', 'url': 'Website'} %}
-
     <div class="section">
         <h2>Medienbibliothek</h2>
 
@@ -339,7 +352,7 @@
                 </thead>
                 <tbody>
                 {% for item in media_list %}
-                    <tr>
+                    <tr{% if item.id in selected_on %} class="is-active"{% endif %}>
                         <td>
                             <span class="original-name" onclick="toggleRename({{ item.id }})">{{ item.original_name }}</span>
                             <form method="POST" action="{{ url_for('rename_media', media_id=item.id) }}"
@@ -363,17 +376,19 @@
                             {% endif %}
                         </td>
                         <td>
-                            <div class="actions">
-                                {% for d in displays %}
-                                    {% if d.id in selected_on.get(item.id, []) %}
-                                        <span class="badge badge-active" title="{{ d.name }}">{{ d.name }}</span>
-                                    {% else %}
-                                        <form method="POST" action="{{ url_for('select_for_display', display_id=d.id, media_id=item.id) }}">
-                                            <button type="submit" class="btn-sm btn-success" title="Auf {{ d.name }} anzeigen">{{ d.name }}</button>
+                            {% for d in displays %}
+                                {% if d.id in selected_on.get(item.id, []) %}
+                                    <div style="margin-bottom:3px;">
+                                        <span class="badge badge-active">✓ {{ d.name }}</span>
+                                    </div>
+                                {% else %}
+                                    <div style="margin-bottom:3px;">
+                                        <form method="POST" action="{{ url_for('select_for_display', display_id=d.id, media_id=item.id) }}" style="display:inline;">
+                                            <button type="submit" class="btn-sm" style="background:#e9ecef;color:#555;font-weight:500;">{{ d.name }}</button>
                                         </form>
-                                    {% endif %}
-                                {% endfor %}
-                            </div>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
                         </td>
                         <td>
                             <div class="actions">

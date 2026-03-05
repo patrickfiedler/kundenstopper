@@ -198,6 +198,7 @@ def display_api(slug):
         'cycle_interval': display['cycle_interval'],
         'background_color': display['background_color'],
         'progress_indicator': display['progress_indicator'],
+        'video_fit': display['video_fit'] if display['video_fit'] else 'contain',
     }
 
     if media['content_type'] == 'pdf':
@@ -360,6 +361,7 @@ def update_display_settings(display_id):
     cycle_interval = request.form.get('cycle_interval', type=int)
     background_color = request.form.get('background_color', '').strip()
     progress_indicator = request.form.get('progress_indicator', '').strip()
+    video_fit = request.form.get('video_fit', '').strip()
 
     errors = []
     if not name:
@@ -374,6 +376,8 @@ def update_display_settings(display_id):
         errors.append('Ungültige Hintergrundfarbe')
     if progress_indicator not in ('progress', 'countdown', 'none'):
         errors.append('Ungültige Fortschrittsanzeige')
+    if video_fit not in ('contain', 'cover'):
+        errors.append('Ungültige Videoskalierung')
 
     if errors:
         for e in errors:
@@ -384,7 +388,7 @@ def update_display_settings(display_id):
 
     update_display(display_id, name=name, width=width, height=height,
                    cycle_interval=cycle_interval, background_color=background_color,
-                   progress_indicator=progress_indicator)
+                   progress_indicator=progress_indicator, video_fit=video_fit)
 
     if resolution_changed:
         display = get_display(display_id)

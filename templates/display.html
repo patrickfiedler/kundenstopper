@@ -30,9 +30,9 @@
         }
 
         #content-container video {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain; /* overridden dynamically via JS */
         }
 
         #content-container iframe {
@@ -164,6 +164,7 @@
         let currentPage = 0;
         let cycleInterval = 10;
         let progressIndicator = 'progress';
+        let videoFit = 'contain';
         let cycleTimer = null;
         let countdownTimer = null;
         let elapsedSeconds = 0;
@@ -292,6 +293,7 @@
                 video.loop = true;
                 video.muted = true;
                 video.playsInline = true;
+                video.style.objectFit = data.video_fit || 'contain';
                 video.oncanplay = function() { loadingDiv.style.display = 'none'; };
                 video.onerror = function() { showError('Video konnte nicht geladen werden'); };
                 container.appendChild(video);
