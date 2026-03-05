@@ -3,7 +3,8 @@ import re
 import uuid
 import glob as glob_module
 import subprocess
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, abort
+import requests as http_requests
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, abort, Response
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
 import bcrypt
@@ -19,6 +20,7 @@ from models import (
     add_pdf_render, get_pdf_renders, delete_pdf_renders,
     delete_pdf_renders_for_display,
     cleanup_old_media,
+    get_url_media_by_url,
 )
 
 app = Flask(__name__)
@@ -233,6 +235,59 @@ def serve_upload(filename):
 def serve_render(display_id, filename):
     render_dir = os.path.join(RENDERS_FOLDER, str(display_id))
     return send_from_directory(render_dir, filename)
+
+
+@app.route('/proxy')
+def proxy():
+    """Fetch a website server-side and strip X-Frame-Options/CSP headers for iframe embedding.
+    Security: only whitelisted URLs (registered url-type media items) are proxied."""
+    url = request.args.get('url', '').strip()
+    if not url or not url.startswith(('http://', 'https://')):
+        abort(400)
+
+    # Whitelist check: only proxy URLs that exist as url-type media items
+    if not get_url_media_by_url(url):
+        abort(403)
+
+    try:
+        resp = http_requests.get(url, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; Kundenstopper/1.0)'
+        })
+    except http_requests.RequestException:
+        abort(502)
+
+    ct = resp.headers.get('content-type', 'text/html')
+
+    # For HTML: inject <base href> so relative links/assets resolve against the origin
+    if 'text/html' in ct:
+        base_tag = f'<base href="{url}">'
+        html = resp.text
+        if re.search(r'<head', html, re.IGNORECASE):
+            html = re.sub(r'(<head[^>]*>)', lambda m: m.group(1) + base_tag,
+                          html, count=1, flags=re.IGNORECASE)
+        else:
+            html = base_tag + html
+        content = html.encode('utf-8', errors='replace')
+        ct = 'text/html; charset=utf-8'
+    else:
+        content = resp.content
+
+    # Forward headers, stripping those that block iframe embedding or conflict with Flask
+    skip = {'x-frame-options', 'transfer-encoding', 'content-encoding', 'content-length'}
+    headers = {}
+    for key, value in resp.headers.items():
+        k = key.lower()
+        if k in skip:
+            continue
+        if k == 'content-security-policy':
+            # Remove frame-ancestors directive only; keep the rest of CSP intact
+            value = re.sub(r'frame-ancestors\s+[^;]*;?\s*', '', value, flags=re.IGNORECASE).strip('; ')
+            if not value:
+                continue
+        headers[key] = value
+    headers['Content-Type'] = ct
+
+    return Response(content, status=resp.status_code, headers=headers)
 
 
 # ---------- Auth ----------

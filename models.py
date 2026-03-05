@@ -236,6 +236,14 @@ def get_all_media(limit=None, offset=0):
         ).fetchall()
 
 
+def get_url_media_by_url(url):
+    """Return the media_item with content_type='url' matching this URL, or None."""
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT * FROM media_items WHERE content_type = 'url' AND url = ?", (url,)
+        ).fetchone()
+
+
 def get_all_pdf_media():
     with get_db() as conn:
         return conn.execute(

@@ -53,6 +53,33 @@ One admin manages N displays. Each display has its own URL, resolution, and cont
 
 ---
 
+## Phase 1b: Website Proxy
+
+### Goal
+Allow websites to be embedded in the display iframe by fetching them server-side and stripping `X-Frame-Options` / `Content-Security-Policy: frame-ancestors` headers.
+
+### How it works
+`<iframe src="/proxy?url=https://example.com">` — Flask fetches the URL, strips the blocking headers, injects `<base href>` so relative links resolve, returns the HTML. Sub-resources (CSS, JS, images) load directly from the origin (no proxy needed for those).
+
+### Backend
+- [x] Add `requests` to `requirements.txt`
+- [x] `/proxy` route: fetch URL, strip headers, inject `<base href>`, return response
+- [x] Security: only proxy URLs that exist as `url`-type media items in the DB (not an open proxy)
+- [x] Preserve Content-Type from origin response
+
+### Frontend
+- [x] `display.html`: `url` content type already uses `<iframe>` — change `src` from direct URL to `/proxy?url=...`
+
+### Limitations (known, accepted)
+- Sites with iframe-busting JavaScript (`if top !== self`) will still break
+- Pages behind authentication / SSO will not work
+- Fallback: screenshot approach (playwright) if proxy is insufficient for a specific site
+
+### Migration
+- [x] `migrations/0002_website_proxy.py` — no DB change needed; proxy is a pure route addition
+
+---
+
 ## Phase 2: Smart TV Optimization
 
 ### Goal
@@ -116,7 +143,8 @@ Proposed layouts:
 ---
 
 ## Status
-**Phase 1 complete** — Phase 2 (Smart TV testing) next when hardware is available.
+**Phase 1 + 1b complete. Phase 2 (Smart TV) when hardware available.**
+Phase 2 (Smart TV testing) when hardware is available.
 
 ## Decisions Made
 - PDF pre-rendering: one PNG per page per display, stored in `renders/<display_id>/` directory
