@@ -289,6 +289,11 @@ def update_media_scale_to_fit(media_id, scale_to_fit):
         )
 
 
+def update_media_url(media_id, url):
+    with get_db() as conn:
+        conn.execute('UPDATE media_items SET url = ? WHERE id = ?', (url, media_id))
+
+
 def update_media_name(media_id, new_name):
     with get_db() as conn:
         conn.execute(

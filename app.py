@@ -4,6 +4,7 @@ import uuid
 import glob as glob_module
 import subprocess
 import requests as http_requests
+from urllib.parse import urlparse, parse_qs
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, abort, Response
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
@@ -22,6 +23,7 @@ from models import (
     cleanup_old_media,
     get_url_media_by_url,
     update_media_scale_to_fit,
+    update_media_url,
     get_playlist_items, add_playlist_item, remove_playlist_item,
     update_playlist_item_duration, move_playlist_item,
 )
@@ -160,14 +162,43 @@ def render_pdf_for_all_displays(filepath, media_id):
 
 # ---------- URL helpers ----------
 
+def make_youtube_embed_with_params(video_id, controls=False, cc=False, cc_lang='', rel=False):
+    """Build a YouTube embed URL from a video ID and display options."""
+    params = [
+        'autoplay=1', 'mute=1', 'loop=1', f'playlist={video_id}',
+        f'controls={"1" if controls else "0"}',
+        f'rel={"1" if rel else "0"}',
+        'iv_load_policy=3',  # hide annotations
+    ]
+    if cc:
+        params.append('cc_load_policy=1')
+        if cc_lang.strip():
+            params.append(f'cc_lang_pref={cc_lang.strip()}')
+    return f'https://www.youtube.com/embed/{video_id}?' + '&'.join(params)
+
+
 def make_youtube_embed(url):
-    """Convert a YouTube watch/short URL to an embed URL, or return url unchanged."""
+    """Convert a YouTube watch/short URL to an embed URL with sensible signage defaults."""
     for pattern in (r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]+)',
                     r'youtu\.be/([a-zA-Z0-9_-]+)'):
         m = re.search(pattern, url)
         if m:
-            return f'https://www.youtube.com/embed/{m.group(1)}?autoplay=1&mute=1&loop=1&playlist={m.group(1)}'
+            return make_youtube_embed_with_params(m.group(1))
     return url
+
+
+def parse_youtube_params(embed_url):
+    """Extract current embed options from a stored YouTube embed URL."""
+    try:
+        params = parse_qs(urlparse(embed_url).query)
+        return {
+            'controls': params.get('controls', ['0'])[0] == '1',
+            'cc':       'cc_load_policy' in params,
+            'cc_lang':  params.get('cc_lang_pref', [''])[0],
+            'rel':      params.get('rel', ['0'])[0] == '1',
+        }
+    except Exception:
+        return {'controls': False, 'cc': False, 'cc_lang': '', 'rel': False}
 
 
 def detect_url_content_type(url):
@@ -408,6 +439,12 @@ def admin():
     display_playlists = {d['id']: get_playlist_items(d['id']) for d in displays}
     all_media = get_all_media()  # unpaginated, for playlist dropdowns
 
+    youtube_params = {
+        item['id']: parse_youtube_params(item['url'])
+        for item in media_list
+        if item['content_type'] == 'youtube' and item['url']
+    }
+
     return render_template(
         'admin.html',
         displays=displays,
@@ -420,6 +457,7 @@ def admin():
         selected_on=selected_on,
         auto_cleanup_enabled=auto_cleanup_enabled,
         auto_cleanup_days=auto_cleanup_days,
+        youtube_params=youtube_params,
     )
 
 
@@ -735,6 +773,32 @@ def toggle_scale_to_fit(media_id):
         flash('Inhalt nicht gefunden oder kein Website-Typ', 'error')
         return redirect(url_for('admin'))
     update_media_scale_to_fit(media_id, not media['scale_to_fit'])
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/media/<int:media_id>/youtube-options', methods=['POST'])
+@login_required
+def youtube_options(media_id):
+    media = get_media(media_id)
+    if not media or media['content_type'] != 'youtube':
+        flash('Inhalt nicht gefunden oder kein YouTube-Typ', 'error')
+        return redirect(url_for('admin'))
+
+    m = re.search(r'/embed/([a-zA-Z0-9_-]+)', media['url'])
+    if not m:
+        flash('Video-ID konnte nicht ermittelt werden', 'error')
+        return redirect(url_for('admin'))
+
+    video_id = m.group(1)
+    new_url = make_youtube_embed_with_params(
+        video_id,
+        controls='controls' in request.form,
+        cc='cc' in request.form,
+        cc_lang=request.form.get('cc_lang', ''),
+        rel='rel' in request.form,
+    )
+    update_media_url(media_id, new_url)
+    flash('YouTube-Einstellungen gespeichert', 'success')
     return redirect(url_for('admin'))
 
 

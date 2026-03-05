@@ -137,6 +137,14 @@
         .display-settings-panel { padding: 14px 16px; border-top: 1px solid #eee; background: #fafafa; display: none; }
         .display-settings-panel .form-row { margin-bottom: 10px; }
 
+        /* YouTube options row */
+        .yt-opts-row { background: #f8f9fa; }
+        .yt-opts-row td { padding: 10px 16px; }
+        .yt-opts-form { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+        .yt-opts-form label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #555; cursor: pointer; }
+        .yt-opts-form input[type="checkbox"] { width: auto; margin: 0; }
+        .yt-opts-form input[type="text"]  { width: 70px; padding: 5px 7px; font-size: 13px; }
+
         /* Playlist panel */
         .display-playlist-panel { padding: 14px 16px; border-top: 1px solid #eee; background: #fafafa; display: none; }
         .playlist-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; }
@@ -492,6 +500,10 @@
                                                 title="Auf Viewport skalieren">Skalierung {% if item.scale_to_fit %}an{% else %}aus{% endif %}</button>
                                     </form>
                                 {% endif %}
+                                {% if item.content_type == 'youtube' %}
+                                    <button type="button" class="btn-sm btn-secondary"
+                                            onclick="toggleYtOpts({{ item.id }})">Optionen</button>
+                                {% endif %}
                                 <form method="POST" action="{{ url_for('delete_media_item', media_id=item.id) }}"
                                       onsubmit="return confirm('&quot;{{ item.original_name }}&quot; wirklich löschen?');">
                                     <button type="submit" class="btn-sm btn-danger">Löschen</button>
@@ -499,6 +511,34 @@
                             </div>
                         </td>
                     </tr>
+                    {% if item.content_type == 'youtube' %}
+                    {% set yp = youtube_params.get(item.id, {}) %}
+                    <tr class="yt-opts-row" id="yt-opts-{{ item.id }}" style="display:none;">
+                        <td colspan="6">
+                            <form method="POST" action="{{ url_for('youtube_options', media_id=item.id) }}" class="yt-opts-form">
+                                <label>
+                                    <input type="checkbox" name="controls" {% if yp.get('controls') %}checked{% endif %}>
+                                    Steuerleiste
+                                </label>
+                                <label>
+                                    <input type="checkbox" name="cc" id="cc-{{ item.id }}"
+                                           {% if yp.get('cc') %}checked{% endif %}
+                                           onchange="toggleCcLang({{ item.id }})">
+                                    Untertitel
+                                </label>
+                                <label id="cc-lang-label-{{ item.id }}" {% if not yp.get('cc') %}style="display:none;"{% endif %}>
+                                    Sprache:
+                                    <input type="text" name="cc_lang" value="{{ yp.get('cc_lang', '') }}" placeholder="de">
+                                </label>
+                                <label>
+                                    <input type="checkbox" name="rel" {% if yp.get('rel') %}checked{% endif %}>
+                                    Verwandte Videos
+                                </label>
+                                <button type="submit" class="btn-sm btn-success">Speichern</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
                 {% endfor %}
                 </tbody>
             </table>
@@ -566,6 +606,14 @@
     function togglePanel(id) {
         var el = document.getElementById(id);
         el.style.display = el.style.display === 'block' ? 'none' : 'block';
+    }
+    function toggleYtOpts(id) {
+        var row = document.getElementById('yt-opts-' + id);
+        row.style.display = row.style.display === 'table-row' ? 'none' : 'table-row';
+    }
+    function toggleCcLang(id) {
+        var checked = document.getElementById('cc-' + id).checked;
+        document.getElementById('cc-lang-label-' + id).style.display = checked ? '' : 'none';
     }
 </script>
 </body>
