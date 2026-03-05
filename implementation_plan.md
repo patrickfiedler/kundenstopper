@@ -1,0 +1,127 @@
+# Implementation Plan: Kundenstopper Expansion
+
+## Goal
+Expand the app from a single-display PDF viewer into a multi-display digital signage platform supporting images, video, websites, and YouTube — managed from one admin backend.
+
+---
+
+## Phase 1: Multiple Displays + Multiple Content Types
+
+### Goal
+One admin manages N displays. Each display has its own URL, resolution, and content. PDFs are pre-rendered to PNG per display.
+
+### DB Changes
+- Rename `pdf_files` → `media_items`, add `content_type` column (`pdf`, `image`, `video`, `youtube`, `url`)
+- Add `displays` table: `id`, `name`, `slug` (URL key), `width`, `height`
+- Add `display_media` join table: `display_id`, `media_id` (which items are assigned to which display)
+- Add `display_settings` table (or extend `settings`): per-display `selected_media_id`, `cycle_interval`, `background_color`, `progress_indicator`
+- Add `pdf_renders` table: `media_id`, `display_id`, `render_path` (pre-rendered PNG path)
+
+### Backend (app.py / models.py)
+- [ ] DB migration: create new tables, migrate existing data
+- [ ] Add `poppler-utils` system dependency (`pdftoppm`)
+- [ ] PDF upload: after saving, trigger `pdftoppm` render for each existing display at its resolution → store in `pdf_renders`
+- [ ] New display CRUD routes: create/edit/delete displays (admin)
+- [ ] When display resolution changes: regenerate all PNG renders for that display
+- [ ] API endpoint per display: `GET /api/display/<slug>` → returns current media info + type
+- [ ] Serve rendered PNGs: `GET /renders/<display_id>/<filename>`
+- [ ] Content assignment: `POST /admin/display/<id>/assign/<media_id>`
+- [ ] URL/YouTube items: stored in DB only (no file), `content_type = youtube` or `url`
+
+### Frontend
+- [ ] Display route: `GET /display/<slug>` (keep `/display` as backwards-compatible default)
+- [ ] display.html: detect content type and render:
+  - `pdf` → serve pre-rendered PNG (simple `<img>` tag, no PDF.js)
+  - `image` → `<img>` tag
+  - `video` → `<video autoplay loop muted>` tag
+  - `youtube` → `<iframe>` with YouTube embed URL
+  - `url` → `<iframe>` with full-screen sizing
+- [ ] Remove PDF.js dependency from display page (keep in codebase for now, just unused)
+- [ ] Admin: display management section (create/edit/delete displays, set resolution)
+- [ ] Admin: assign content to display
+- [ ] Admin: upload accepts images (`jpg`, `png`, `gif`, `webp`) and video (`mp4`, `webm`) in addition to PDF
+- [ ] Admin: add URL/YouTube input field (no file upload needed)
+
+### Migration Notes
+- Existing single display → becomes "Display 1" with slug `default`
+- Existing `/display` route → redirects to `/display/default`
+- Existing PDFs → migrated to `media_items`, rendered for default display on startup
+
+### Open Questions
+- [ ] Multi-page PDFs: pre-render all pages as individual PNGs, cycle through them (replaces PDF.js cycling logic)
+- [ ] File size limits: video files can be large — raise limit or make configurable
+
+---
+
+## Phase 2: Smart TV Optimization
+
+### Goal
+Ensure reliable, performant display on Smart TV built-in browsers (Samsung Tizen, LG WebOS, Android TV).
+
+### Research Needed
+- [ ] Test current Phase 1 display page on target TV browser
+- [ ] Identify JS/CSS compatibility issues
+- [ ] Measure image/video load times on TV hardware
+
+### Changes (based on findings)
+- [ ] Per-display "TV mode" flag in `displays` table
+- [ ] TV mode: simplified display.html with minimal JS (no ES modules if needed, plain `<script>`)
+- [ ] TV mode: aggressive caching headers for images/video
+- [ ] TV mode: preload next image while current is displayed
+- [ ] Optional: `/display/<slug>?tv=1` query param to force TV mode without DB change
+- [ ] Consider: auto-detect TV browser via User-Agent and switch mode automatically
+
+### Notes
+- Phase 1 already removes PDF.js from display (biggest compatibility risk)
+- Images and video are native browser features — should work on all TV browsers
+- ES modules (`type="module"`) may not work on older Smart TVs — evaluate in Phase 1
+
+---
+
+## Phase 3: Multi-Zone Layouts
+
+### Goal
+A display can be divided into independently-controlled zones, each showing different content.
+
+### Approach: Predefined Layouts (avoid full layout editor)
+Start with a small set of named layout templates rather than a drag-and-drop editor.
+
+Proposed layouts:
+- `fullscreen` — 1 zone (current behavior)
+- `split-horizontal` — 2 zones, 50/50 left/right
+- `split-vertical` — 2 zones, 70/30 top/bottom
+- `main-sidebar` — large main zone + narrow sidebar
+- `main-ticker` — large main zone + bottom ticker strip
+
+### DB Changes
+- Add `layout` column to `displays` table (default: `fullscreen`)
+- Add `zones` table: `id`, `display_id`, `zone_key` (e.g. `main`, `sidebar`, `ticker`), `selected_media_id`, `cycle_interval`
+- `display_settings` moves to zone level for per-zone cycling
+
+### Backend
+- [ ] Zone CRUD in admin
+- [ ] API: `GET /api/display/<slug>` returns all zones with their current media
+- [ ] Content assignment per zone
+
+### Frontend
+- [ ] display.html: render layout container with CSS Grid
+- [ ] Each zone runs its own independent polling + cycling loop
+- [ ] Each zone renders its content type (reuses Phase 1 type-rendering logic)
+- [ ] Admin: layout picker per display, zone content assignment UI
+
+### Deferral Strategy
+- Phase 3 can be started with just `fullscreen` + `split-horizontal` to prove the architecture
+- More layouts added incrementally without schema changes
+
+---
+
+## Status
+**Phase 1 complete** — Phase 2 (Smart TV testing) next when hardware is available.
+
+## Decisions Made
+- PDF pre-rendering: one PNG per page per display, stored in `renders/<display_id>/` directory
+- PNG format (not JPG) for all PDF renders — lossless, sharp text
+- Render resolution: use display `width` × `height` from DB, calculate DPI from PDF page dimensions
+- Smart TV: remove PDF.js from display page in Phase 1 (biggest compatibility win, zero extra effort)
+- Multiple zones: predefined layout templates only, no drag-and-drop editor
+- Backwards compatibility: `/display` continues to work (redirects to default display)

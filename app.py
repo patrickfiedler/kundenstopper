@@ -1,30 +1,36 @@
 import os
+import re
 import uuid
-import mimetypes
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory
+import glob as glob_module
+import subprocess
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
 import bcrypt
 
 from config import config
 from models import (
-    init_db, add_pdf, get_pdf, get_all_pdfs, get_pdf_count,
-    update_pdf_name, delete_pdf, get_newest_pdf,
-    get_setting, set_setting, cleanup_old_pdfs
+    init_db,
+    get_setting, set_setting,
+    get_all_displays, get_display, get_display_by_slug,
+    create_display, update_display, delete_display,
+    add_media, get_media, get_all_media, get_all_pdf_media,
+    get_media_count, get_newest_media, update_media_name, delete_media,
+    add_pdf_render, get_pdf_renders, delete_pdf_renders,
+    delete_pdf_renders_for_display,
+    cleanup_old_media,
 )
-
-# Add MIME type for .mjs files (ES6 JavaScript modules)
-mimetypes.add_type('text/javascript', '.mjs')
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config.secret_key
 app.config['UPLOAD_FOLDER'] = config.upload_folder
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
 
-# Ensure upload folder exists
+RENDERS_FOLDER = 'renders'
+
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(RENDERS_FOLDER, exist_ok=True)
 
-# Initialize database
 init_db()
 
 # Flask-Login setup
@@ -32,9 +38,15 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
+# Allowed upload extensions mapped to content type
+ALLOWED_EXTENSIONS = {
+    'pdf': 'pdf',
+    'jpg': 'image', 'jpeg': 'image', 'png': 'image', 'gif': 'image', 'webp': 'image',
+    'mp4': 'video', 'webm': 'video', 'mov': 'video',
+}
+
 
 class User(UserMixin):
-    """Simple user class for Flask-Login."""
     def __init__(self, username):
         self.id = username
         self.username = username
@@ -42,80 +54,200 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    """Load user for Flask-Login."""
     if user_id == config.admin_username:
         return User(user_id)
     return None
 
 
 def verify_password(password):
-    """Verify password against stored hash."""
     password_hash = config.admin_password_hash
     if not password_hash:
         return False
     return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
 
 
+# ---------- PDF rendering ----------
+
+def _dpi_for_display(width, height):
+    """Calculate a suitable render DPI for a given display resolution."""
+    dpi = round(max(width, height) / 7)
+    return max(100, min(300, dpi))
+
+
+def render_pdf_for_display(filepath, media_id, display):
+    """Pre-render all pages of a PDF as PNGs for one display. Returns page count."""
+    display_id = display['id']
+    render_dir = os.path.join(RENDERS_FOLDER, str(display_id))
+    os.makedirs(render_dir, exist_ok=True)
+
+    # Remove stale renders for this media+display
+    old_renders = delete_pdf_renders(media_id, display_id)
+    for fname in old_renders:
+        old_path = os.path.join(render_dir, fname)
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+    dpi = _dpi_for_display(display['width'], display['height'])
+    prefix = str(uuid.uuid4())
+    prefix_path = os.path.join(render_dir, prefix)
+
+    try:
+        result = subprocess.run(
+            ['pdftoppm', '-r', str(dpi), '-png', filepath, prefix_path],
+            capture_output=True, text=True, timeout=120
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            'pdftoppm nicht gefunden. Bitte poppler-utils installieren: '
+            'sudo apt install poppler-utils'
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError(f'pdftoppm Fehler: {result.stderr.strip()}')
+
+    # Sort pages numerically (pdftoppm pads with leading zeros)
+    pages = sorted(
+        glob_module.glob(f'{prefix_path}-*.png'),
+        key=lambda p: int(re.search(r'-(\d+)\.png$', p).group(1))
+    )
+
+    if not pages:
+        raise RuntimeError('pdftoppm hat keine Seiten ausgegeben — ist die PDF-Datei gültig?')
+
+    for i, page_path in enumerate(pages, 1):
+        add_pdf_render(media_id, display_id, i, os.path.basename(page_path))
+
+    return len(pages)
+
+
+def render_pdf_for_all_displays(filepath, media_id):
+    """Render a PDF for every existing display. Returns dict {display_id: page_count or error}."""
+    results = {}
+    for display in get_all_displays():
+        try:
+            results[display['id']] = render_pdf_for_display(filepath, media_id, display)
+        except RuntimeError as e:
+            results[display['id']] = str(e)
+    return results
+
+
+# ---------- URL helpers ----------
+
+def make_youtube_embed(url):
+    """Convert a YouTube watch/short URL to an embed URL, or return url unchanged."""
+    for pattern in (r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]+)',
+                    r'youtu\.be/([a-zA-Z0-9_-]+)'):
+        m = re.search(pattern, url)
+        if m:
+            return f'https://www.youtube.com/embed/{m.group(1)}?autoplay=1&mute=1&loop=1&playlist={m.group(1)}'
+    return url
+
+
+def detect_url_content_type(url):
+    """Detect content type for a URL entry."""
+    if re.search(r'youtube\.com|youtu\.be', url, re.IGNORECASE):
+        return 'youtube'
+    return 'url'
+
+
+# ---------- Public routes ----------
+
 @app.route('/')
 def index():
-    """Redirect to display page."""
-    return redirect(url_for('display'))
+    displays = get_all_displays()
+    if displays:
+        return redirect(url_for('display_by_slug', slug=displays[0]['slug']))
+    return redirect(url_for('display_by_slug', slug='default'))
 
 
 @app.route('/display')
-def display():
-    """Public display page for showing PDFs."""
-    return render_template('display.html')
+def display_legacy():
+    """Backwards-compatible redirect to first display."""
+    displays = get_all_displays()
+    slug = displays[0]['slug'] if displays else 'default'
+    return redirect(url_for('display_by_slug', slug=slug))
+
+
+@app.route('/display/<slug>')
+def display_by_slug(slug):
+    display = get_display_by_slug(slug)
+    if not display:
+        abort(404)
+    return render_template('display.html', slug=slug)
+
+
+@app.route('/api/display/<slug>')
+def display_api(slug):
+    """API endpoint: current content info for a display."""
+    display = get_display_by_slug(slug)
+    if not display:
+        return jsonify({'error': 'Display nicht gefunden'}), 404
+
+    selected_id = display['selected_media_id']
+    media = get_newest_media() if selected_id == 0 else get_media(selected_id)
+
+    if not media:
+        return jsonify({'error': 'Kein Inhalt verfügbar'}), 404
+
+    response = {
+        'content_type': media['content_type'],
+        'original_name': media['original_name'],
+        'cycle_interval': display['cycle_interval'],
+        'background_color': display['background_color'],
+        'progress_indicator': display['progress_indicator'],
+    }
+
+    if media['content_type'] == 'pdf':
+        renders = get_pdf_renders(media['id'], display['id'])
+        response['pages'] = [
+            url_for('serve_render', display_id=display['id'], filename=r['render_filename'])
+            for r in renders
+        ]
+    elif media['content_type'] in ('image', 'video'):
+        response['url'] = url_for('serve_upload', filename=media['filename'])
+    else:  # youtube, url
+        response['url'] = media['url']
+
+    return jsonify(response)
 
 
 @app.route('/api/current-pdf')
-def current_pdf():
-    """API endpoint to get the current PDF to display."""
-    selected_id = get_setting('selected_pdf_id', '0')
-
-    # If no specific PDF is selected (0), use the newest
-    if selected_id == '0':
-        pdf = get_newest_pdf()
-    else:
-        pdf = get_pdf(int(selected_id))
-
-    if pdf:
-        cycle_interval = int(get_setting('cycle_interval', '10'))
-        background_color = get_setting('background_color', '#ffffff')
-        progress_indicator = get_setting('progress_indicator', 'progress')
-        return jsonify({
-            'filename': pdf['filename'],
-            'original_name': pdf['original_name'],
-            'cycle_interval': cycle_interval,
-            'background_color': background_color,
-            'progress_indicator': progress_indicator
-        })
-
-    return jsonify({'error': 'Keine PDF verfügbar'}), 404
+def current_pdf_legacy():
+    """Backwards-compatible API: proxies to first display's API."""
+    displays = get_all_displays()
+    if not displays:
+        return jsonify({'error': 'Keine Anzeige konfiguriert'}), 404
+    return display_api(displays[0]['slug'])
 
 
 @app.route('/uploads/<filename>')
-def serve_pdf(filename):
-    """Serve PDF files."""
+def serve_upload(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 
+@app.route('/renders/<int:display_id>/<filename>')
+def serve_render(display_id, filename):
+    render_dir = os.path.join(RENDERS_FOLDER, str(display_id))
+    return send_from_directory(render_dir, filename)
+
+
+# ---------- Auth ----------
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Admin login page."""
     if current_user.is_authenticated:
         return redirect(url_for('admin'))
 
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-
         if username == config.admin_username and verify_password(password):
-            user = User(username)
-            login_user(user)
+            login_user(User(username))
             return redirect(url_for('admin'))
-        else:
-            flash('Ungültiger Benutzername oder Passwort', 'error')
+        flash('Ungültiger Benutzername oder Passwort', 'error')
 
     return render_template('login.html')
 
@@ -123,196 +255,377 @@ def login():
 @app.route('/logout')
 @login_required
 def logout():
-    """Logout the current user."""
     logout_user()
     return redirect(url_for('login'))
 
 
+# ---------- Admin ----------
+
 @app.route('/admin')
 @login_required
 def admin():
-    """Admin panel for managing PDFs."""
     page = request.args.get('page', 1, type=int)
     per_page = 10
     offset = (page - 1) * per_page
 
-    pdfs = get_all_pdfs(limit=per_page, offset=offset)
-    total_pdfs = get_pdf_count()
-    total_pages = (total_pdfs + per_page - 1) // per_page
+    media_list = get_all_media(limit=per_page, offset=offset)
+    total_media = get_media_count()
+    total_pages = (total_media + per_page - 1) // per_page
 
-    selected_id = int(get_setting('selected_pdf_id', '0'))
-    cycle_interval = int(get_setting('cycle_interval', '10'))
-    background_color = get_setting('background_color', '#ffffff')
-    progress_indicator = get_setting('progress_indicator', 'progress')
+    displays = get_all_displays()
+
+    # For each display, resolve what's currently showing
+    display_current = {}
+    for d in displays:
+        sid = d['selected_media_id']
+        display_current[d['id']] = get_newest_media() if sid == 0 else get_media(sid)
+
+    # For each media item, collect which display IDs have it selected
+    selected_on = {}  # media_id → list of display ids
+    for d in displays:
+        sid = d['selected_media_id']
+        if sid != 0:
+            selected_on.setdefault(sid, []).append(d['id'])
+
     auto_cleanup_enabled = get_setting('auto_cleanup_enabled', 'true')
     auto_cleanup_days = int(get_setting('auto_cleanup_days', '180'))
 
     return render_template(
         'admin.html',
-        pdfs=pdfs,
+        displays=displays,
+        display_current=display_current,
+        media_list=media_list,
         page=page,
         total_pages=total_pages,
-        selected_id=selected_id,
-        cycle_interval=cycle_interval,
-        background_color=background_color,
-        progress_indicator=progress_indicator,
+        selected_on=selected_on,
         auto_cleanup_enabled=auto_cleanup_enabled,
-        auto_cleanup_days=auto_cleanup_days
+        auto_cleanup_days=auto_cleanup_days,
     )
 
 
+# --- Display management ---
+
+@app.route('/admin/display/create', methods=['POST'])
+@login_required
+def create_display_route():
+    name = request.form.get('name', '').strip()
+    slug = request.form.get('slug', '').strip().lower()
+    width = request.form.get('width', type=int)
+    height = request.form.get('height', type=int)
+
+    if not name or not slug or not width or not height:
+        flash('Alle Felder sind erforderlich', 'error')
+        return redirect(url_for('admin'))
+
+    if not re.match(r'^[a-z0-9][a-z0-9-]*$', slug):
+        flash('URL-Kürzel darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten', 'error')
+        return redirect(url_for('admin'))
+
+    if get_display_by_slug(slug):
+        flash(f'URL-Kürzel "{slug}" ist bereits vergeben', 'error')
+        return redirect(url_for('admin'))
+
+    display_id = create_display(name, slug, width, height)
+    display = get_display(display_id)
+
+    # Render all existing PDFs for this new display
+    errors = []
+    for media in get_all_pdf_media():
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], media['filename'])
+        if os.path.exists(filepath):
+            try:
+                render_pdf_for_display(filepath, media['id'], display)
+            except RuntimeError as e:
+                errors.append(f'{media["original_name"]}: {e}')
+
+    if errors:
+        flash(f'Display "{name}" erstellt. Render-Fehler: ' + '; '.join(errors), 'error')
+    else:
+        flash(f'Display "{name}" erfolgreich erstellt', 'success')
+
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/display/<int:display_id>/settings', methods=['POST'])
+@login_required
+def update_display_settings(display_id):
+    display = get_display(display_id)
+    if not display:
+        flash('Display nicht gefunden', 'error')
+        return redirect(url_for('admin'))
+
+    name = request.form.get('name', '').strip()
+    width = request.form.get('width', type=int)
+    height = request.form.get('height', type=int)
+    cycle_interval = request.form.get('cycle_interval', type=int)
+    background_color = request.form.get('background_color', '').strip()
+    progress_indicator = request.form.get('progress_indicator', '').strip()
+
+    errors = []
+    if not name:
+        errors.append('Name darf nicht leer sein')
+    if not width or width < 1:
+        errors.append('Ungültige Breite')
+    if not height or height < 1:
+        errors.append('Ungültige Höhe')
+    if not cycle_interval or cycle_interval < 1:
+        errors.append('Ungültiges Wechselintervall')
+    if not (background_color and len(background_color) == 7 and background_color.startswith('#')):
+        errors.append('Ungültige Hintergrundfarbe')
+    if progress_indicator not in ('progress', 'countdown', 'none'):
+        errors.append('Ungültige Fortschrittsanzeige')
+
+    if errors:
+        for e in errors:
+            flash(e, 'error')
+        return redirect(url_for('admin'))
+
+    resolution_changed = (width != display['width'] or height != display['height'])
+
+    update_display(display_id, name=name, width=width, height=height,
+                   cycle_interval=cycle_interval, background_color=background_color,
+                   progress_indicator=progress_indicator)
+
+    if resolution_changed:
+        display = get_display(display_id)
+        render_errors = []
+        for media in get_all_pdf_media():
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], media['filename'])
+            if os.path.exists(filepath):
+                try:
+                    render_pdf_for_display(filepath, media['id'], display)
+                except RuntimeError as e:
+                    render_errors.append(f'{media["original_name"]}: {e}')
+        if render_errors:
+            flash('Einstellungen gespeichert. Render-Fehler: ' + '; '.join(render_errors), 'error')
+        else:
+            flash(f'Einstellungen gespeichert, PDFs für neue Auflösung neu gerendert', 'success')
+    else:
+        flash('Einstellungen gespeichert', 'success')
+
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/display/<int:display_id>/delete', methods=['POST'])
+@login_required
+def delete_display_route(display_id):
+    displays = get_all_displays()
+    if len(displays) <= 1:
+        flash('Das letzte Display kann nicht gelöscht werden', 'error')
+        return redirect(url_for('admin'))
+
+    # Clean up render files
+    render_filenames = delete_pdf_renders_for_display(display_id)
+    render_dir = os.path.join(RENDERS_FOLDER, str(display_id))
+    for fname in render_filenames:
+        path = os.path.join(render_dir, fname)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    delete_display(display_id)
+    flash('Display gelöscht', 'success')
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/display/<int:display_id>/select/<int:media_id>', methods=['POST'])
+@login_required
+def select_for_display(display_id, media_id):
+    display = get_display(display_id)
+    media = get_media(media_id)
+
+    if not display or not media:
+        flash('Display oder Inhalt nicht gefunden', 'error')
+        return redirect(url_for('admin'))
+
+    update_display(display_id, selected_media_id=media_id)
+    flash(f'"{media["original_name"]}" wird auf "{display["name"]}" angezeigt', 'success')
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/display/<int:display_id>/select-newest', methods=['POST'])
+@login_required
+def select_newest_for_display(display_id):
+    display = get_display(display_id)
+    if not display:
+        flash('Display nicht gefunden', 'error')
+        return redirect(url_for('admin'))
+
+    update_display(display_id, selected_media_id=0)
+    flash(f'"{display["name"]}" zeigt jetzt den neuesten Inhalt', 'success')
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/display/<int:display_id>/regenerate', methods=['POST'])
+@login_required
+def regenerate_renders(display_id):
+    display = get_display(display_id)
+    if not display:
+        flash('Display nicht gefunden', 'error')
+        return redirect(url_for('admin'))
+
+    errors = []
+    count = 0
+    for media in get_all_pdf_media():
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], media['filename'])
+        if os.path.exists(filepath):
+            try:
+                render_pdf_for_display(filepath, media['id'], display)
+                count += 1
+            except RuntimeError as e:
+                errors.append(f'{media["original_name"]}: {e}')
+
+    if errors:
+        flash(f'{count} PDF(s) gerendert. Fehler: ' + '; '.join(errors), 'error')
+    else:
+        flash(f'{count} PDF(s) für "{display["name"]}" erfolgreich neu gerendert', 'success')
+
+    return redirect(url_for('admin'))
+
+
+# --- Content management ---
+
 @app.route('/admin/upload', methods=['POST'])
 @login_required
-def upload_pdf():
-    """Upload a new PDF file."""
+def upload_file():
     if 'file' not in request.files:
         flash('Keine Datei ausgewählt', 'error')
         return redirect(url_for('admin'))
 
     file = request.files['file']
-
-    if file.filename == '':
+    if not file.filename:
         flash('Keine Datei ausgewählt', 'error')
         return redirect(url_for('admin'))
 
-    if not file.filename.lower().endswith('.pdf'):
-        flash('Nur PDF-Dateien sind erlaubt', 'error')
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    content_type = ALLOWED_EXTENSIONS.get(ext)
+    if not content_type:
+        flash('Nicht unterstütztes Dateiformat. Erlaubt: PDF, Bild (JPG/PNG/GIF/WebP), Video (MP4/WebM/MOV)', 'error')
         return redirect(url_for('admin'))
 
-    # Generate unique filename
     original_name = secure_filename(file.filename)
-    file_ext = '.pdf'
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
+    unique_filename = f'{uuid.uuid4()}.{ext}'
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-
-    # Save file
     file.save(filepath)
     file_size = os.path.getsize(filepath)
 
-    # Add to database
-    add_pdf(unique_filename, original_name, file_size)
+    media_id = add_media(content_type, original_name, filename=unique_filename, file_size=file_size)
 
-    # Run automatic cleanup of old PDFs
-    deleted_count = cleanup_old_pdfs(app.config['UPLOAD_FOLDER'])
-    if deleted_count > 0:
-        flash(f'Datei "{original_name}" erfolgreich hochgeladen. {deleted_count} alte Datei(en) automatisch gelöscht.', 'success')
+    # For PDFs: pre-render for all displays
+    if content_type == 'pdf':
+        errors = []
+        for display in get_all_displays():
+            try:
+                render_pdf_for_display(filepath, media_id, display)
+            except RuntimeError as e:
+                errors.append(f'{display["name"]}: {e}')
+
+        deleted_count = cleanup_old_media(app.config['UPLOAD_FOLDER'])
+        msg = f'"{original_name}" erfolgreich hochgeladen'
+        if errors:
+            flash(msg + '. Render-Fehler: ' + '; '.join(errors), 'error')
+        elif deleted_count > 0:
+            flash(f'{msg}. {deleted_count} alte Datei(en) automatisch gelöscht.', 'success')
+        else:
+            flash(msg, 'success')
     else:
-        flash(f'Datei "{original_name}" erfolgreich hochgeladen', 'success')
+        deleted_count = cleanup_old_media(app.config['UPLOAD_FOLDER'])
+        msg = f'"{original_name}" erfolgreich hochgeladen'
+        flash(f'{msg}. {deleted_count} alte Datei(en) gelöscht.' if deleted_count else msg, 'success')
 
     return redirect(url_for('admin'))
 
 
-@app.route('/admin/rename/<int:pdf_id>', methods=['POST'])
+@app.route('/admin/url', methods=['POST'])
 @login_required
-def rename_pdf(pdf_id):
-    """Rename a PDF file."""
-    new_name = request.form.get('new_name', '').strip()
+def add_url():
+    name = request.form.get('name', '').strip()
+    raw_url = request.form.get('url', '').strip()
 
+    if not name or not raw_url:
+        flash('Name und URL sind erforderlich', 'error')
+        return redirect(url_for('admin'))
+
+    if not raw_url.startswith(('http://', 'https://')):
+        flash('URL muss mit http:// oder https:// beginnen', 'error')
+        return redirect(url_for('admin'))
+
+    content_type = detect_url_content_type(raw_url)
+    final_url = make_youtube_embed(raw_url) if content_type == 'youtube' else raw_url
+
+    add_media(content_type, name, url=final_url)
+    flash(f'"{name}" erfolgreich hinzugefügt', 'success')
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/rename/<int:media_id>', methods=['POST'])
+@login_required
+def rename_media(media_id):
+    new_name = request.form.get('new_name', '').strip()
     if not new_name:
         flash('Name darf nicht leer sein', 'error')
         return redirect(url_for('admin'))
 
-    if not new_name.lower().endswith('.pdf'):
+    media = get_media(media_id)
+    if media and media['content_type'] == 'pdf' and not new_name.lower().endswith('.pdf'):
         new_name += '.pdf'
 
-    update_pdf_name(pdf_id, new_name)
-    flash('Datei erfolgreich umbenannt', 'success')
+    update_media_name(media_id, new_name)
+    flash('Umbenennung erfolgreich', 'success')
     return redirect(url_for('admin'))
 
 
-@app.route('/admin/delete/<int:pdf_id>', methods=['POST'])
+@app.route('/admin/delete/<int:media_id>', methods=['POST'])
 @login_required
-def delete_pdf_file(pdf_id):
-    """Delete a PDF file."""
-    filename = delete_pdf(pdf_id)
+def delete_media_item(media_id):
+    result = delete_media(media_id)
+    if not result:
+        flash('Inhalt nicht gefunden', 'error')
+        return redirect(url_for('admin'))
 
-    if filename:
-        # Delete physical file
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    # Delete physical file
+    if result['filename']:
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], result['filename'])
         if os.path.exists(filepath):
-            os.remove(filepath)
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
 
-        # If this was the selected PDF, reset to newest
-        if int(get_setting('selected_pdf_id', '0')) == pdf_id:
-            set_setting('selected_pdf_id', '0')
+    # Delete render files
+    for display_id, render_filename in result['renders']:
+        render_path = os.path.join(RENDERS_FOLDER, str(display_id), render_filename)
+        if os.path.exists(render_path):
+            try:
+                os.remove(render_path)
+            except OSError:
+                pass
 
-        flash('Datei erfolgreich gelöscht', 'success')
-    else:
-        flash('Datei nicht gefunden', 'error')
-
-    return redirect(url_for('admin'))
-
-
-@app.route('/admin/select/<int:pdf_id>', methods=['POST'])
-@login_required
-def select_pdf(pdf_id):
-    """Select a PDF to display."""
-    pdf = get_pdf(pdf_id)
-
-    if pdf:
-        set_setting('selected_pdf_id', pdf_id)
-        flash(f'Wird jetzt angezeigt: {pdf["original_name"]}', 'success')
-    else:
-        flash('Datei nicht gefunden', 'error')
-
-    return redirect(url_for('admin'))
-
-
-@app.route('/admin/select-newest', methods=['POST'])
-@login_required
-def select_newest():
-    """Set display to show newest PDF automatically."""
-    set_setting('selected_pdf_id', '0')
-    flash('Anzeige auf neueste PDF eingestellt', 'success')
+    flash('Inhalt erfolgreich gelöscht', 'success')
     return redirect(url_for('admin'))
 
 
 @app.route('/admin/settings', methods=['POST'])
 @login_required
-def update_settings():
-    """Update application settings."""
-    cycle_interval = request.form.get('cycle_interval', type=int)
-    background_color = request.form.get('background_color', '').strip()
-    progress_indicator = request.form.get('progress_indicator', '').strip()
+def update_global_settings():
     auto_cleanup_enabled = request.form.get('auto_cleanup_enabled', '').strip()
     auto_cleanup_days = request.form.get('auto_cleanup_days', type=int)
 
     errors = []
-
-    # Validate and update cycle interval
-    if cycle_interval and cycle_interval > 0:
-        set_setting('cycle_interval', cycle_interval)
-    else:
-        errors.append('Ungültiges Wechselintervall')
-
-    # Validate and update background color
-    if background_color and len(background_color) == 7 and background_color.startswith('#'):
-        set_setting('background_color', background_color)
-    else:
-        errors.append('Ungültige Hintergrundfarbe')
-
-    # Validate and update progress indicator
-    if progress_indicator in ['countdown', 'progress', 'none']:
-        set_setting('progress_indicator', progress_indicator)
-    else:
-        errors.append('Ungültige Fortschrittsanzeige')
-
-    # Validate and update auto cleanup settings
-    if auto_cleanup_enabled in ['true', 'false']:
-        set_setting('auto_cleanup_enabled', auto_cleanup_enabled)
-    else:
+    if auto_cleanup_enabled not in ('true', 'false'):
         errors.append('Ungültige Auto-Cleanup-Einstellung')
-
-    if auto_cleanup_days and auto_cleanup_days > 0:
-        set_setting('auto_cleanup_days', auto_cleanup_days)
-    else:
+    if not auto_cleanup_days or auto_cleanup_days < 1:
         errors.append('Ungültige Aufbewahrungsdauer')
 
     if errors:
-        for error in errors:
-            flash(error, 'error')
+        for e in errors:
+            flash(e, 'error')
     else:
-        flash('Einstellungen erfolgreich aktualisiert', 'success')
+        set_setting('auto_cleanup_enabled', auto_cleanup_enabled)
+        set_setting('auto_cleanup_days', auto_cleanup_days)
+        flash('Einstellungen gespeichert', 'success')
 
     return redirect(url_for('admin'))
 
@@ -320,20 +633,18 @@ def update_settings():
 @app.route('/admin/cleanup', methods=['POST'])
 @login_required
 def manual_cleanup():
-    """Manually trigger cleanup of old PDF files."""
-    deleted_count = cleanup_old_pdfs(app.config['UPLOAD_FOLDER'])
-
+    deleted_count = cleanup_old_media(app.config['UPLOAD_FOLDER'])
     if deleted_count > 0:
-        flash(f'{deleted_count} alte Datei(en) erfolgreich gelöscht', 'success')
+        flash(f'{deleted_count} alte Datei(en) gelöscht', 'success')
     else:
         flash('Keine alten Dateien zum Löschen gefunden', 'info')
-
     return redirect(url_for('admin'))
 
 
 if __name__ == '__main__':
     from waitress import serve
-    print(f"Starting Kundenstopper on {config.host}:{config.port}")
-    print(f"Display URL: http://{config.host}:{config.port}/display")
-    print(f"Admin URL: http://{config.host}:{config.port}/admin")
+    print(f'Starting Kundenstopper on {config.host}:{config.port}')
+    print(f'Admin: http://{config.host}:{config.port}/admin')
+    for d in get_all_displays():
+        print(f'Display "{d["name"]}": http://{config.host}:{config.port}/display/{d["slug"]}')
     serve(app, host=config.host, port=config.port)

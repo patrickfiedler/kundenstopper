@@ -3,31 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kundenstopper Anzeige</title>
+    <title>Kundenstopper</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             background: #ffffff;
             overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
-        #pdf-container {
+        #content-container {
             width: 100vw;
             height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
+            overflow: hidden;
         }
 
-        #pdf-canvas {
+        #content-container img {
             max-width: 100%;
             max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        #content-container video {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        #content-container iframe {
+            width: 100vw;
+            height: 100vh;
+            border: none;
         }
 
         #loading {
@@ -35,9 +46,24 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: white;
-            font-size: 24px;
+            color: #888;
+            font-size: 20px;
             text-align: center;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-top: 4px solid #888;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         #error {
@@ -46,24 +72,10 @@
             left: 50%;
             transform: translate(-50%, -50%);
             color: #ff6b6b;
-            font-size: 20px;
+            font-size: 18px;
             text-align: center;
             display: none;
-        }
-
-        .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top: 4px solid white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            max-width: 80%;
         }
 
         #countdown {
@@ -121,13 +133,10 @@
 <body>
     <div id="loading">
         <div class="spinner"></div>
-        PDF wird geladen...
+        Wird geladen...
     </div>
-
     <div id="error"></div>
-
     <div id="countdown"></div>
-
     <div id="progress-container">
         <div id="progress-wrapper">
             <div id="progress-bar-bg">
@@ -136,262 +145,206 @@
             <span id="page-indicator"></span>
         </div>
     </div>
+    <div id="content-container"></div>
 
-    <div id="pdf-container">
-        <canvas id="pdf-canvas"></canvas>
-    </div>
+    <script>
+        const DISPLAY_SLUG = {{ slug | tojson }};
+        const API_URL = '/api/display/' + DISPLAY_SLUG;
 
-    <script type="module">
-        // Import PDF.js as ES module
-        import * as pdfjsLib from '{{ url_for("static", filename="pdfjs/build/pdf.mjs") }}';
-
-        // Configure PDF.js worker
-        pdfjsLib.GlobalWorkerOptions.workerSrc = '{{ url_for("static", filename="pdfjs/build/pdf.worker.mjs") }}';
-
-        let pdfDoc = null;
-        let currentPage = 1;
-        let totalPages = 0;
-        let cycleInterval = 10;
-        let previousCycleInterval = 10;
-        let cycleTimer = null;
-        let currentPdfUrl = null;
-        let countdownSeconds = 0;
-        let countdownTimer = null;
-        let progressIndicator = 'progress'; // 'countdown', 'progress', or 'none'
-        let elapsedSeconds = 0;
-
-        const canvas = document.getElementById('pdf-canvas');
-        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('content-container');
         const loadingDiv = document.getElementById('loading');
         const errorDiv = document.getElementById('error');
         const countdownDiv = document.getElementById('countdown');
         const progressContainer = document.getElementById('progress-container');
-        const pageIndicator = document.getElementById('page-indicator');
         const progressBarFill = document.getElementById('progress-bar-fill');
+        const pageIndicator = document.getElementById('page-indicator');
 
-        function showError(message) {
+        // State
+        let pages = [];
+        let currentPage = 0;
+        let cycleInterval = 10;
+        let progressIndicator = 'progress';
+        let cycleTimer = null;
+        let countdownTimer = null;
+        let elapsedSeconds = 0;
+        let countdownSeconds = 0;
+        let currentStateKey = null;
+
+        function getStateKey(data) {
+            if (data.content_type === 'pdf') return 'pdf:' + (data.pages && data.pages[0] || '');
+            return (data.content_type || '') + ':' + (data.url || '');
+        }
+
+        function showError(msg) {
             loadingDiv.style.display = 'none';
-            errorDiv.textContent = message;
+            errorDiv.textContent = msg;
             errorDiv.style.display = 'block';
         }
 
-        function hideError() {
+        function clearError() {
             errorDiv.style.display = 'none';
         }
 
-        function updateProgressIndicator() {
-            // Don't show anything for single-page PDFs
-            if (totalPages <= 1) {
+        // --- Progress indicator ---
+
+        function updateProgress() {
+            if (pages.length <= 1) {
                 countdownDiv.style.display = 'none';
                 progressContainer.style.display = 'none';
                 return;
             }
-
             if (progressIndicator === 'countdown') {
-                // Show countdown
+                countdownDiv.textContent = countdownSeconds + 's';
                 countdownDiv.style.display = 'block';
                 progressContainer.style.display = 'none';
-                if (countdownSeconds > 0) {
-                    countdownDiv.textContent = countdownSeconds + 's';
-                }
             } else if (progressIndicator === 'progress') {
-                // Show progress bar
+                pageIndicator.textContent = 'Seite ' + (currentPage + 1) + '/' + pages.length;
+                progressBarFill.style.width = ((elapsedSeconds / cycleInterval) * 100) + '%';
                 countdownDiv.style.display = 'none';
                 progressContainer.style.display = 'block';
-
-                // Update page indicator
-                pageIndicator.textContent = `Seite ${currentPage}/${totalPages}`;
-
-                // Update progress bar
-                const progressPercent = (elapsedSeconds / cycleInterval) * 100;
-                progressBarFill.style.width = progressPercent + '%';
             } else {
-                // Hide both
                 countdownDiv.style.display = 'none';
                 progressContainer.style.display = 'none';
             }
         }
 
-        function startProgressIndicator() {
-            // Stop existing timer
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-            }
-
-            // Reset counters
+        function startProgress() {
+            if (countdownTimer) clearInterval(countdownTimer);
             countdownSeconds = cycleInterval;
             elapsedSeconds = 0;
-            updateProgressIndicator();
-
-            // Start timer (updates every second)
-            countdownTimer = setInterval(() => {
-                countdownSeconds--;
+            updateProgress();
+            countdownTimer = setInterval(function() {
+                countdownSeconds = Math.max(0, countdownSeconds - 1);
                 elapsedSeconds++;
-                updateProgressIndicator();
-
-                if (countdownSeconds < 0) {
-                    countdownSeconds = cycleInterval;
-                    elapsedSeconds = 0;
-                }
+                updateProgress();
             }, 1000);
         }
 
-        function stopProgressIndicator() {
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-            }
+        function stopProgress() {
+            if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
             countdownDiv.style.display = 'none';
             progressContainer.style.display = 'none';
         }
 
-        function renderPage(pageNum) {
-            if (!pdfDoc) return;
+        // --- Page cycling (PDF only) ---
 
-            pdfDoc.getPage(pageNum).then(page => {
-                const viewport = page.getViewport({ scale: 1 });
-
-                // Calculate scale to fit screen
-                const scaleX = window.innerWidth / viewport.width;
-                const scaleY = window.innerHeight / viewport.height;
-                const scale = Math.min(scaleX, scaleY);
-
-                const scaledViewport = page.getViewport({ scale: scale });
-
-                canvas.height = scaledViewport.height;
-                canvas.width = scaledViewport.width;
-
-                const renderContext = {
-                    canvasContext: ctx,
-                    viewport: scaledViewport
-                };
-
-                page.render(renderContext).promise.then(() => {
-                    loadingDiv.style.display = 'none';
-                });
-            }).catch(err => {
-                console.error('Error rendering page:', err);
-                showError('Fehler beim Rendern der PDF-Seite');
-            });
+        function showPage(index) {
+            container.innerHTML = '';
+            if (!pages[index]) return;
+            var img = document.createElement('img');
+            img.src = pages[index];
+            img.onload = function() { loadingDiv.style.display = 'none'; };
+            container.appendChild(img);
         }
 
         function nextPage() {
-            if (!pdfDoc) return;
-
-            currentPage++;
-            if (currentPage > totalPages) {
-                currentPage = 1; // Loop back to first page
-            }
-
-            renderPage(currentPage);
-
-            // Reset progress indicator when page changes
-            if (totalPages > 1) {
-                countdownSeconds = cycleInterval;
-                elapsedSeconds = 0;
-                updateProgressIndicator();
-            }
+            currentPage = (currentPage + 1) % pages.length;
+            showPage(currentPage);
+            countdownSeconds = cycleInterval;
+            elapsedSeconds = 0;
+            updateProgress();
         }
 
         function startCycling() {
-            if (cycleTimer) {
-                clearInterval(cycleTimer);
+            if (cycleTimer) clearInterval(cycleTimer);
+            if (pages.length > 1) {
+                cycleTimer = setInterval(nextPage, cycleInterval * 1000);
+                startProgress();
             }
-
-            // Cycle to next page every X seconds
-            cycleTimer = setInterval(nextPage, cycleInterval * 1000);
-
-            // Start progress indicator
-            startProgressIndicator();
         }
 
-        function loadPdf(url) {
+        function stopCycling() {
+            if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; }
+            stopProgress();
+        }
+
+        // --- Content rendering ---
+
+        function renderContent(data) {
+            stopCycling();
+            container.innerHTML = '';
+            clearError();
             loadingDiv.style.display = 'block';
-            hideError();
 
-            if (cycleTimer) {
-                clearInterval(cycleTimer);
-            }
+            var ct = data.content_type;
 
-            // Stop progress indicator when loading new PDF
-            stopProgressIndicator();
-
-            pdfjsLib.getDocument(url).promise.then(pdf => {
-                pdfDoc = pdf;
-                totalPages = pdf.numPages;
-                currentPage = 1;
-
-                console.log(`PDF geladen: ${totalPages} Seiten`);
-                renderPage(currentPage);
-
-                // Start automatic cycling if more than one page
-                if (totalPages > 1) {
-                    startCycling();
-                } else {
-                    // Hide progress indicator for single-page PDFs
-                    stopProgressIndicator();
+            if (ct === 'pdf') {
+                pages = data.pages || [];
+                currentPage = 0;
+                if (pages.length === 0) {
+                    showError('Keine gerenderten Seiten gefunden. Bitte PDFs neu rendern.');
+                    return;
                 }
-            }).catch(err => {
-                console.error('Error loading PDF:', err);
-                showError('Fehler beim Laden der PDF-Datei');
-            });
+                showPage(0);
+                if (pages.length > 1) startCycling();
+
+            } else if (ct === 'image') {
+                var img = document.createElement('img');
+                img.src = data.url;
+                img.onload = function() { loadingDiv.style.display = 'none'; };
+                img.onerror = function() { showError('Bild konnte nicht geladen werden'); };
+                container.appendChild(img);
+
+            } else if (ct === 'video') {
+                var video = document.createElement('video');
+                video.src = data.url;
+                video.autoplay = true;
+                video.loop = true;
+                video.muted = true;
+                video.playsInline = true;
+                video.oncanplay = function() { loadingDiv.style.display = 'none'; };
+                video.onerror = function() { showError('Video konnte nicht geladen werden'); };
+                container.appendChild(video);
+
+            } else if (ct === 'youtube' || ct === 'url') {
+                var iframe = document.createElement('iframe');
+                iframe.src = data.url;
+                iframe.allow = 'autoplay; fullscreen';
+                iframe.onload = function() { loadingDiv.style.display = 'none'; };
+                container.appendChild(iframe);
+            }
         }
 
-        function checkForPdfUpdates() {
-            fetch('/api/current-pdf')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Keine PDF verfügbar');
-                    }
-                    return response.json();
+        // --- Polling ---
+
+        function poll() {
+            fetch(API_URL)
+                .then(function(r) {
+                    if (!r.ok) throw new Error('Kein Inhalt verfügbar');
+                    return r.json();
                 })
-                .then(data => {
-                    const newPdfUrl = '/uploads/' + data.filename;
-                    const newCycleInterval = data.cycle_interval;
-                    const newProgressIndicator = data.progress_indicator || 'progress';
+                .then(function(data) {
+                    document.body.style.backgroundColor = data.background_color || '#ffffff';
 
-                    // Update background color
-                    if (data.background_color) {
-                        document.body.style.backgroundColor = data.background_color;
-                    }
+                    var newKey = getStateKey(data);
+                    var newInterval = data.cycle_interval;
+                    var newIndicator = data.progress_indicator || 'progress';
 
-                    // Update progress indicator mode if changed
-                    if (progressIndicator !== newProgressIndicator) {
-                        progressIndicator = newProgressIndicator;
-                        updateProgressIndicator();
-                    }
-
-                    // Only reload if PDF changed
-                    if (newPdfUrl !== currentPdfUrl) {
-                        currentPdfUrl = newPdfUrl;
-                        cycleInterval = newCycleInterval;
-                        previousCycleInterval = newCycleInterval;
-                        loadPdf(currentPdfUrl);
-                    } else if (cycleTimer && newCycleInterval !== previousCycleInterval) {
-                        // Update cycle interval only if it actually changed
-                        cycleInterval = newCycleInterval;
-                        previousCycleInterval = newCycleInterval;
-                        startCycling();
+                    if (newKey !== currentStateKey) {
+                        // Content changed — full reload
+                        currentStateKey = newKey;
+                        cycleInterval = newInterval;
+                        progressIndicator = newIndicator;
+                        renderContent(data);
+                    } else {
+                        // Same content — update settings live
+                        if (newIndicator !== progressIndicator) {
+                            progressIndicator = newIndicator;
+                            updateProgress();
+                        }
+                        if (newInterval !== cycleInterval && cycleTimer) {
+                            cycleInterval = newInterval;
+                            startCycling();
+                        }
                     }
                 })
-                .catch(err => {
-                    console.error('Error fetching current PDF:', err);
-                    showError('Keine PDF-Datei zur Anzeige verfügbar');
+                .catch(function(err) {
+                    showError('Kein Inhalt verfügbar');
                 });
         }
 
-        // Initial load
-        checkForPdfUpdates();
-
-        // Check for updates every 10 seconds
-        setInterval(checkForPdfUpdates, 10000);
-
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            if (pdfDoc && currentPage) {
-                renderPage(currentPage);
-            }
-        });
+        poll();
+        setInterval(poll, 10000);
     </script>
 </body>
 </html>

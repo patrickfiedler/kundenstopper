@@ -22,59 +22,119 @@ def get_db():
 
 
 def init_db():
-    """Initialize the database with required tables."""
+    """Initialize the database with required tables and migrate legacy data."""
     with get_db() as conn:
         conn.execute('''
-            CREATE TABLE IF NOT EXISTS pdf_files (
+            CREATE TABLE IF NOT EXISTS displays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL UNIQUE,
-                original_name TEXT NOT NULL,
-                upload_date TIMESTAMP NOT NULL,
-                file_size INTEGER NOT NULL
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                width INTEGER NOT NULL DEFAULT 1920,
+                height INTEGER NOT NULL DEFAULT 1080,
+                selected_media_id INTEGER NOT NULL DEFAULT 0,
+                cycle_interval INTEGER NOT NULL DEFAULT 10,
+                background_color TEXT NOT NULL DEFAULT '#ffffff',
+                progress_indicator TEXT NOT NULL DEFAULT 'progress'
             )
         ''')
 
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS media_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_type TEXT NOT NULL,
+                filename TEXT,
+                original_name TEXT NOT NULL,
+                url TEXT,
+                upload_date TIMESTAMP NOT NULL,
+                file_size INTEGER NOT NULL DEFAULT 0
+            )
+        ''')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS pdf_renders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                display_id INTEGER NOT NULL,
+                page_number INTEGER NOT NULL,
+                render_filename TEXT NOT NULL,
+                UNIQUE(media_id, display_id, page_number)
+            )
+        ''')
+
+        # Global settings (auto-cleanup only; display settings live in displays table)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )
         ''')
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_cleanup_enabled', 'true')")
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_cleanup_days', '180')")
 
-        # Initialize default settings
-        conn.execute('''
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES ('selected_pdf_id', '0')
-        ''')
+        # --- Migrate legacy pdf_files table if present ---
+        legacy_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='pdf_files'"
+        ).fetchone()
 
-        conn.execute('''
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES ('cycle_interval', '10')
-        ''')
+        if legacy_table:
+            migrated = conn.execute(
+                "SELECT COUNT(*) FROM media_items WHERE content_type = 'pdf'"
+            ).fetchone()[0]
 
-        conn.execute('''
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES ('background_color', '#ffffff')
-        ''')
+            if migrated == 0:
+                old_pdfs = conn.execute(
+                    'SELECT * FROM pdf_files ORDER BY upload_date ASC'
+                ).fetchall()
+                for pdf in old_pdfs:
+                    conn.execute(
+                        '''INSERT OR IGNORE INTO media_items
+                           (content_type, filename, original_name, upload_date, file_size)
+                           VALUES (?, ?, ?, ?, ?)''',
+                        ('pdf', pdf['filename'], pdf['original_name'],
+                         pdf['upload_date'], pdf['file_size'])
+                    )
 
-        conn.execute('''
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES ('progress_indicator', 'progress')
-        ''')
+        # --- Create default display if none exist ---
+        if conn.execute('SELECT COUNT(*) FROM displays').fetchone()[0] == 0:
+            # Pull legacy per-display settings if available
+            def _legacy(key, default):
+                row = conn.execute(
+                    'SELECT value FROM settings WHERE key = ?', (key,)
+                ).fetchone()
+                return row['value'] if row else default
 
-        conn.execute('''
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES ('auto_cleanup_enabled', 'true')
-        ''')
+            cycle_interval = int(_legacy('cycle_interval', '10'))
+            background_color = _legacy('background_color', '#ffffff')
+            progress_indicator = _legacy('progress_indicator', 'progress')
 
-        conn.execute('''
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES ('auto_cleanup_days', '180')
-        ''')
+            # Map legacy selected_pdf_id → media_item id
+            selected_media_id = 0
+            old_sel_id = int(_legacy('selected_pdf_id', '0'))
+            if old_sel_id > 0 and legacy_table:
+                old_pdf = conn.execute(
+                    'SELECT filename FROM pdf_files WHERE id = ?', (old_sel_id,)
+                ).fetchone()
+                if old_pdf:
+                    media = conn.execute(
+                        'SELECT id FROM media_items WHERE filename = ?',
+                        (old_pdf['filename'],)
+                    ).fetchone()
+                    if media:
+                        selected_media_id = media['id']
 
+            conn.execute(
+                '''INSERT INTO displays
+                   (name, slug, width, height, selected_media_id,
+                    cycle_interval, background_color, progress_indicator)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                ('Standard', 'default', 1920, 1080, selected_media_id,
+                 cycle_interval, background_color, progress_indicator)
+            )
+
+
+# ---------- global settings ----------
 
 def get_setting(key, default=None):
-    """Get a setting value from the database."""
     with get_db() as conn:
         result = conn.execute(
             'SELECT value FROM settings WHERE key = ?', (key,)
@@ -83,7 +143,6 @@ def get_setting(key, default=None):
 
 
 def set_setting(key, value):
-    """Set a setting value in the database."""
     with get_db() as conn:
         conn.execute(
             'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
@@ -91,139 +150,253 @@ def set_setting(key, value):
         )
 
 
-def add_pdf(filename, original_name, file_size):
-    """Add a new PDF file to the database."""
+# ---------- displays ----------
+
+def get_all_displays():
+    with get_db() as conn:
+        return conn.execute('SELECT * FROM displays ORDER BY id').fetchall()
+
+
+def get_display(display_id):
+    with get_db() as conn:
+        return conn.execute(
+            'SELECT * FROM displays WHERE id = ?', (display_id,)
+        ).fetchone()
+
+
+def get_display_by_slug(slug):
+    with get_db() as conn:
+        return conn.execute(
+            'SELECT * FROM displays WHERE slug = ?', (slug,)
+        ).fetchone()
+
+
+def create_display(name, slug, width, height):
     with get_db() as conn:
         conn.execute(
-            '''INSERT INTO pdf_files (filename, original_name, upload_date, file_size)
-               VALUES (?, ?, ?, ?)''',
-            (filename, original_name, datetime.now(), file_size)
+            'INSERT INTO displays (name, slug, width, height) VALUES (?, ?, ?, ?)',
+            (name, slug, width, height)
         )
         return conn.execute('SELECT last_insert_rowid()').fetchone()[0]
 
 
-def get_pdf(pdf_id):
-    """Get a PDF file by ID."""
+def update_display(display_id, **kwargs):
+    allowed = {'name', 'width', 'height', 'selected_media_id',
+               'cycle_interval', 'background_color', 'progress_indicator'}
+    fields = [(k, v) for k, v in kwargs.items() if k in allowed and v is not None]
+    if not fields:
+        return
+    set_clause = ', '.join(f'{k} = ?' for k, _ in fields)
+    values = [v for _, v in fields] + [display_id]
+    with get_db() as conn:
+        conn.execute(f'UPDATE displays SET {set_clause} WHERE id = ?', values)
+
+
+def delete_display(display_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM displays WHERE id = ?', (display_id,))
+
+
+# ---------- media items ----------
+
+def add_media(content_type, original_name, filename=None, url=None, file_size=0):
+    with get_db() as conn:
+        conn.execute(
+            '''INSERT INTO media_items
+               (content_type, filename, original_name, url, upload_date, file_size)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (content_type, filename, original_name, url, datetime.now(), file_size)
+        )
+        return conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+
+def get_media(media_id):
     with get_db() as conn:
         return conn.execute(
-            'SELECT * FROM pdf_files WHERE id = ?', (pdf_id,)
+            'SELECT * FROM media_items WHERE id = ?', (media_id,)
         ).fetchone()
 
 
-def get_all_pdfs(limit=None, offset=0):
-    """Get all PDF files, ordered by upload date (newest first)."""
+def get_all_media(limit=None, offset=0):
     with get_db() as conn:
         if limit:
             return conn.execute(
-                '''SELECT * FROM pdf_files
-                   ORDER BY upload_date DESC
-                   LIMIT ? OFFSET ?''',
+                'SELECT * FROM media_items ORDER BY upload_date DESC LIMIT ? OFFSET ?',
                 (limit, offset)
             ).fetchall()
-        else:
-            return conn.execute(
-                'SELECT * FROM pdf_files ORDER BY upload_date DESC'
-            ).fetchall()
+        return conn.execute(
+            'SELECT * FROM media_items ORDER BY upload_date DESC'
+        ).fetchall()
 
 
-def get_pdf_count():
-    """Get total count of PDF files."""
-    with get_db() as conn:
-        return conn.execute('SELECT COUNT(*) FROM pdf_files').fetchone()[0]
-
-
-def update_pdf_name(pdf_id, new_name):
-    """Update the original name of a PDF file."""
-    with get_db() as conn:
-        conn.execute(
-            'UPDATE pdf_files SET original_name = ? WHERE id = ?',
-            (new_name, pdf_id)
-        )
-
-
-def delete_pdf(pdf_id):
-    """Delete a PDF file from the database."""
-    with get_db() as conn:
-        pdf = get_pdf(pdf_id)
-        if pdf:
-            conn.execute('DELETE FROM pdf_files WHERE id = ?', (pdf_id,))
-            return pdf['filename']
-        return None
-
-
-def get_newest_pdf():
-    """Get the newest uploaded PDF file."""
+def get_all_pdf_media():
     with get_db() as conn:
         return conn.execute(
-            'SELECT * FROM pdf_files ORDER BY upload_date DESC LIMIT 1'
+            "SELECT * FROM media_items WHERE content_type = 'pdf'"
+        ).fetchall()
+
+
+def get_media_count():
+    with get_db() as conn:
+        return conn.execute('SELECT COUNT(*) FROM media_items').fetchone()[0]
+
+
+def get_newest_media():
+    with get_db() as conn:
+        return conn.execute(
+            'SELECT * FROM media_items ORDER BY upload_date DESC LIMIT 1'
         ).fetchone()
 
 
-def cleanup_old_pdfs(upload_folder):
-    """
-    Delete PDF files older than the configured threshold.
-    Excludes the currently active PDF from deletion.
+def update_media_name(media_id, new_name):
+    with get_db() as conn:
+        conn.execute(
+            'UPDATE media_items SET original_name = ? WHERE id = ?',
+            (new_name, media_id)
+        )
 
-    Args:
-        upload_folder: Path to the uploads directory
 
-    Returns:
-        int: Number of files deleted
-    """
+def delete_media(media_id):
+    """Delete a media item. Returns dict {filename, renders} for filesystem cleanup."""
+    with get_db() as conn:
+        item = conn.execute(
+            'SELECT * FROM media_items WHERE id = ?', (media_id,)
+        ).fetchone()
+        if not item:
+            return None
+
+        renders = conn.execute(
+            'SELECT display_id, render_filename FROM pdf_renders WHERE media_id = ?',
+            (media_id,)
+        ).fetchall()
+
+        conn.execute('DELETE FROM pdf_renders WHERE media_id = ?', (media_id,))
+        conn.execute('DELETE FROM media_items WHERE id = ?', (media_id,))
+        conn.execute(
+            'UPDATE displays SET selected_media_id = 0 WHERE selected_media_id = ?',
+            (media_id,)
+        )
+
+        return {
+            'filename': item['filename'],
+            'renders': [(r['display_id'], r['render_filename']) for r in renders],
+        }
+
+
+# ---------- pdf renders ----------
+
+def add_pdf_render(media_id, display_id, page_number, render_filename):
+    with get_db() as conn:
+        conn.execute(
+            '''INSERT OR REPLACE INTO pdf_renders
+               (media_id, display_id, page_number, render_filename)
+               VALUES (?, ?, ?, ?)''',
+            (media_id, display_id, page_number, render_filename)
+        )
+
+
+def get_pdf_renders(media_id, display_id):
+    with get_db() as conn:
+        return conn.execute(
+            '''SELECT * FROM pdf_renders
+               WHERE media_id = ? AND display_id = ?
+               ORDER BY page_number''',
+            (media_id, display_id)
+        ).fetchall()
+
+
+def delete_pdf_renders(media_id, display_id):
+    """Delete renders for a media+display pair. Returns list of render filenames."""
+    with get_db() as conn:
+        renders = conn.execute(
+            '''SELECT render_filename FROM pdf_renders
+               WHERE media_id = ? AND display_id = ?''',
+            (media_id, display_id)
+        ).fetchall()
+        conn.execute(
+            'DELETE FROM pdf_renders WHERE media_id = ? AND display_id = ?',
+            (media_id, display_id)
+        )
+        return [r['render_filename'] for r in renders]
+
+
+def delete_pdf_renders_for_display(display_id):
+    """Delete all renders for a display. Returns list of render filenames."""
+    with get_db() as conn:
+        renders = conn.execute(
+            'SELECT render_filename FROM pdf_renders WHERE display_id = ?',
+            (display_id,)
+        ).fetchall()
+        conn.execute('DELETE FROM pdf_renders WHERE display_id = ?', (display_id,))
+        return [r['render_filename'] for r in renders]
+
+
+# ---------- cleanup ----------
+
+def cleanup_old_media(upload_folder):
+    """Delete file-based media items older than the configured threshold."""
     from datetime import timedelta
 
-    # Check if auto cleanup is enabled
-    auto_cleanup_enabled = get_setting('auto_cleanup_enabled', 'true')
-    if auto_cleanup_enabled.lower() != 'true':
+    if get_setting('auto_cleanup_enabled', 'true').lower() != 'true':
         return 0
 
-    # Get cleanup threshold in days
     cleanup_days = int(get_setting('auto_cleanup_days', '180'))
-
-    # Get currently active PDF ID
-    selected_pdf_id = int(get_setting('selected_pdf_id', '0'))
-
-    # If selected_pdf_id is 0, get the actual newest PDF ID to exclude it
-    active_pdf_id = None
-    if selected_pdf_id == 0:
-        newest_pdf = get_newest_pdf()
-        if newest_pdf:
-            active_pdf_id = newest_pdf['id']
-    else:
-        active_pdf_id = selected_pdf_id
-
-    # Calculate cutoff date
     cutoff_date = datetime.now() - timedelta(days=cleanup_days)
 
-    # Find old PDFs to delete
     with get_db() as conn:
-        if active_pdf_id:
-            old_pdfs = conn.execute(
-                '''SELECT * FROM pdf_files
-                   WHERE upload_date < ? AND id != ?''',
-                (cutoff_date, active_pdf_id)
+        # Collect all actively-selected media IDs across displays
+        active_ids = set()
+        displays = conn.execute('SELECT id, selected_media_id FROM displays').fetchall()
+        for d in displays:
+            sid = d['selected_media_id']
+            if sid == 0:
+                newest = conn.execute(
+                    'SELECT id FROM media_items ORDER BY upload_date DESC LIMIT 1'
+                ).fetchone()
+                if newest:
+                    active_ids.add(newest['id'])
+            else:
+                active_ids.add(sid)
+
+        if active_ids:
+            placeholders = ','.join('?' * len(active_ids))
+            old_items = conn.execute(
+                f'''SELECT * FROM media_items
+                    WHERE upload_date < ?
+                    AND filename IS NOT NULL
+                    AND id NOT IN ({placeholders})''',
+                [cutoff_date, *active_ids]
             ).fetchall()
         else:
-            # No active PDF, delete all old ones
-            old_pdfs = conn.execute(
-                '''SELECT * FROM pdf_files
-                   WHERE upload_date < ?''',
+            old_items = conn.execute(
+                '''SELECT * FROM media_items
+                   WHERE upload_date < ? AND filename IS NOT NULL''',
                 (cutoff_date,)
             ).fetchall()
 
         deleted_count = 0
-        for pdf in old_pdfs:
-            # Delete from database
-            conn.execute('DELETE FROM pdf_files WHERE id = ?', (pdf['id'],))
+        for item in old_items:
+            renders = conn.execute(
+                'SELECT display_id, render_filename FROM pdf_renders WHERE media_id = ?',
+                (item['id'],)
+            ).fetchall()
+            conn.execute('DELETE FROM pdf_renders WHERE media_id = ?', (item['id'],))
+            conn.execute('DELETE FROM media_items WHERE id = ?', (item['id'],))
 
-            # Delete physical file
-            filepath = os.path.join(upload_folder, pdf['filename'])
+            filepath = os.path.join(upload_folder, item['filename'])
             if os.path.exists(filepath):
                 try:
                     os.remove(filepath)
                     deleted_count += 1
                 except OSError:
-                    # Log error but continue with other files
                     pass
+
+            for r in renders:
+                render_path = os.path.join('renders', str(r['display_id']), r['render_filename'])
+                if os.path.exists(render_path):
+                    try:
+                        os.remove(render_path)
+                    except OSError:
+                        pass
 
         return deleted_count

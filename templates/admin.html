@@ -5,14 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Verwaltung - Kundenstopper</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f5f5f5;
             padding: 20px;
         }
@@ -22,7 +18,7 @@
             margin: 0 auto;
             background: white;
             border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             padding: 30px;
         }
 
@@ -35,98 +31,25 @@
             border-bottom: 2px solid #e1e1e1;
         }
 
-        h1 {
-            color: #333;
-            font-size: 28px;
-        }
+        h1 { color: #333; font-size: 26px; }
+        h2 { color: #333; margin-bottom: 15px; font-size: 20px; }
 
-        .logout-btn {
-            padding: 10px 20px;
-            background: #dc3545;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-size: 14px;
-            transition: background 0.3s;
-        }
+        .section { margin-bottom: 40px; }
 
-        .logout-btn:hover {
-            background: #c82333;
-        }
-
+        /* Alerts */
         .alert {
             padding: 12px 20px;
             margin-bottom: 20px;
             border-radius: 5px;
             font-size: 14px;
         }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 
-        .alert-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .alert-error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .alert-info {
-            background-color: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-
-        .section {
-            margin-bottom: 40px;
-        }
-
-        .section h2 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 20px;
-        }
-
-        .upload-form {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-
-        .form-row {
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-        }
-
-        .form-group {
-            flex: 1;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 5px;
-            color: #555;
-            font-weight: 500;
-            font-size: 14px;
-        }
-
-        input[type="file"],
-        input[type="text"],
-        input[type="number"],
-        select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-
+        /* Buttons */
         button, .btn {
-            padding: 10px 20px;
+            padding: 9px 18px;
             background: #667eea;
             color: white;
             border: none;
@@ -134,302 +57,406 @@
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.3s;
+            transition: background 0.2s;
             text-decoration: none;
             display: inline-block;
         }
+        button:hover, .btn:hover { background: #5568d3; }
+        .btn-danger  { background: #dc3545; }
+        .btn-danger:hover { background: #c82333; }
+        .btn-success { background: #28a745; }
+        .btn-success:hover { background: #218838; }
+        .btn-info    { background: #17a2b8; }
+        .btn-info:hover { background: #138496; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #545b62; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .logout-btn { padding: 9px 18px; background: #dc3545; color: white;
+                      text-decoration: none; border-radius: 5px; font-size: 14px; transition: background 0.2s; }
+        .logout-btn:hover { background: #c82333; }
 
-        button:hover, .btn:hover {
-            background: #5568d3;
+        /* Forms */
+        .form-bg { background: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 15px; }
+        .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+        .form-group { flex: 1; min-width: 140px; }
+        .form-group-sm { min-width: 80px; max-width: 120px; }
+        label { display: block; margin-bottom: 5px; color: #555; font-weight: 500; font-size: 13px; }
+        input[type="text"], input[type="number"], input[type="url"], input[type="color"], select {
+            width: 100%; padding: 9px 10px; border: 1px solid #ddd;
+            border-radius: 5px; font-size: 14px;
         }
+        input[type="file"] { width: 100%; padding: 8px; border: 1px solid #ddd;
+                             border-radius: 5px; font-size: 14px; }
 
-        .btn-danger {
-            background: #dc3545;
-        }
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        th, td { padding: 11px 12px; text-align: left; border-bottom: 1px solid #e1e1e1; font-size: 14px; }
+        th { background: #f8f9fa; font-weight: 600; color: #333; }
+        tr:hover td { background: #f8f9fa; }
+        .actions { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 
-        .btn-danger:hover {
-            background: #c82333;
-        }
-
-        .btn-success {
-            background: #28a745;
-        }
-
-        .btn-success:hover {
-            background: #218838;
-        }
-
-        .btn-info {
-            background: #17a2b8;
-        }
-
-        .btn-info:hover {
-            background: #138496;
-        }
-
-        .btn-sm {
-            padding: 6px 12px;
-            font-size: 12px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-        }
-
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #e1e1e1;
-        }
-
-        th {
-            background: #f8f9fa;
-            font-weight: 600;
-            color: #333;
-        }
-
-        tr:hover {
-            background: #f8f9fa;
-        }
-
-        .actions {
-            display: flex;
-            gap: 5px;
-        }
-
-        .pagination {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 20px;
-        }
-
-        .pagination a, .pagination span {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            text-decoration: none;
-            color: #333;
-        }
-
-        .pagination a:hover {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
-        }
-
-        .pagination .current {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
-        }
-
+        /* Badges */
         .badge {
-            display: inline-block;
-            padding: 4px 8px;
-            background: #28a745;
-            color: white;
-            border-radius: 3px;
-            font-size: 12px;
-            font-weight: 600;
+            display: inline-block; padding: 3px 8px;
+            border-radius: 3px; font-size: 11px; font-weight: 700;
+            color: white; white-space: nowrap;
         }
+        .badge-pdf     { background: #007bff; }
+        .badge-image   { background: #28a745; }
+        .badge-video   { background: #6f42c1; }
+        .badge-youtube { background: #dc3545; }
+        .badge-url     { background: #6c757d; }
+        .badge-active  { background: #28a745; }
 
-        .settings-form {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 5px;
+        /* Pagination */
+        .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 15px; }
+        .pagination a, .pagination span {
+            padding: 7px 12px; border: 1px solid #ddd;
+            border-radius: 5px; text-decoration: none; color: #333; font-size: 14px;
         }
+        .pagination a:hover { background: #667eea; color: white; border-color: #667eea; }
+        .pagination .current { background: #667eea; color: white; border-color: #667eea; }
 
-        .rename-form {
-            display: none;
+        /* Display cards */
+        .display-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .display-card {
+            border: 1px solid #ddd; border-radius: 8px; overflow: hidden;
         }
+        .display-card-header {
+            padding: 14px 16px; background: #f8f9fa;
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+        }
+        .display-card-header .display-name { font-weight: 700; font-size: 16px; color: #333; }
+        .display-card-header .display-meta { font-size: 12px; color: #777; margin-top: 3px; }
+        .display-card-header .display-meta a { color: #667eea; text-decoration: none; }
+        .display-card-header .display-meta a:hover { text-decoration: underline; }
+        .display-card-body { padding: 12px 16px; border-top: 1px solid #eee; }
+        .display-card-body .now-playing { font-size: 13px; color: #555; margin-bottom: 10px; }
+        .display-card-body .now-playing strong { color: #333; }
+        .display-settings-panel { padding: 14px 16px; border-top: 1px solid #eee; background: #fafafa; display: none; }
+        .display-settings-panel .form-row { margin-bottom: 10px; }
 
-        .rename-form.active {
-            display: flex;
-            gap: 5px;
-            margin-top: 5px;
-        }
-
-        .original-name {
-            cursor: pointer;
-            color: #667eea;
-        }
-
-        .original-name:hover {
-            text-decoration: underline;
-        }
+        /* Rename inline */
+        .original-name { cursor: pointer; color: #667eea; }
+        .original-name:hover { text-decoration: underline; }
+        .rename-form { display: none; }
+        .rename-form.active { display: flex; gap: 5px; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Kundenstopper Verwaltung</h1>
-            <a href="{{ url_for('logout') }}" class="logout-btn">Abmelden</a>
-        </header>
+<div class="container">
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+    <header>
+        <h1>Kundenstopper Verwaltung</h1>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Abmelden</a>
+    </header>
 
-        <div class="section">
-            <h2>Neue PDF hochladen</h2>
-            <div class="upload-form">
-                <form method="POST" action="{{ url_for('upload_pdf') }}" enctype="multipart/form-data">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="file">PDF-Datei auswählen</label>
-                            <input type="file" id="file" name="file" accept=".pdf" required>
-                        </div>
-                        <button type="submit">Hochladen</button>
-                    </div>
-                </form>
-            </div>
-        </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
 
-        <div class="section">
-            <h2>Einstellungen</h2>
-            <div class="settings-form">
-                <form method="POST" action="{{ url_for('update_settings') }}">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="cycle_interval">Seitenwechsel-Intervall (Sekunden)</label>
-                            <input type="number" id="cycle_interval" name="cycle_interval"
-                                   value="{{ cycle_interval }}" min="1" max="300" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="background_color">Hintergrundfarbe (Anzeige)</label>
-                            <input type="color" id="background_color" name="background_color"
-                                   value="{{ background_color }}" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="progress_indicator">Fortschrittsanzeige</label>
-                            <select id="progress_indicator" name="progress_indicator" required>
-                                <option value="progress" {% if progress_indicator == 'progress' %}selected{% endif %}>Fortschrittsbalken</option>
-                                <option value="countdown" {% if progress_indicator == 'countdown' %}selected{% endif %}>Countdown</option>
-                                <option value="none" {% if progress_indicator == 'none' %}selected{% endif %}>Keine</option>
-                            </select>
+    <!-- ===== DISPLAYS ===== -->
+    <div class="section">
+        <h2>Displays</h2>
+
+        <div class="display-cards">
+            {% for d in displays %}
+            <div class="display-card">
+                <div class="display-card-header">
+                    <div>
+                        <div class="display-name">{{ d.name }}</div>
+                        <div class="display-meta">
+                            {{ d.width }}×{{ d.height }} px &nbsp;|&nbsp;
+                            <a href="{{ url_for('display_by_slug', slug=d.slug) }}" target="_blank">/display/{{ d.slug }}</a>
                         </div>
                     </div>
-                    <div class="form-row" style="margin-top: 15px;">
-                        <div class="form-group">
-                            <label for="auto_cleanup_enabled">Automatisches Löschen alter PDFs</label>
-                            <select id="auto_cleanup_enabled" name="auto_cleanup_enabled" required>
-                                <option value="true" {% if auto_cleanup_enabled == 'true' %}selected{% endif %}>Aktiviert</option>
-                                <option value="false" {% if auto_cleanup_enabled == 'false' %}selected{% endif %}>Deaktiviert</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="auto_cleanup_days">Aufbewahrungsdauer (Tage)</label>
-                            <input type="number" id="auto_cleanup_days" name="auto_cleanup_days"
-                                   value="{{ auto_cleanup_days }}" min="1" max="3650" required>
-                        </div>
-                        <button type="submit">Einstellungen aktualisieren</button>
+                    <div class="actions">
+                        <button class="btn-sm btn-secondary" type="button"
+                                onclick="togglePanel('settings-{{ d.id }}')">Einstellungen</button>
+                        {% if displays|length > 1 %}
+                        <form method="POST" action="{{ url_for('delete_display_route', display_id=d.id) }}"
+                              onsubmit="return confirm('Display &quot;{{ d.name }}&quot; wirklich löschen?');">
+                            <button type="submit" class="btn-sm btn-danger">Löschen</button>
+                        </form>
+                        {% endif %}
                     </div>
-                </form>
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
-                    <form method="POST" action="{{ url_for('manual_cleanup') }}"
-                          onsubmit="return confirm('Möchten Sie alte PDFs jetzt löschen? PDFs älter als {{ auto_cleanup_days }} Tage werden gelöscht (aktive PDF wird ausgeschlossen).');">
-                        <button type="submit" class="btn-info">Alte PDFs jetzt löschen</button>
+                </div>
+
+                <div class="display-card-body">
+                    <div class="now-playing">
+                        Zeigt gerade:
+                        {% set current = display_current.get(d.id) %}
+                        {% if current %}
+                            <strong>{{ current.original_name }}</strong>
+                            {% if d.selected_media_id == 0 %}
+                                <span style="color:#999;font-size:11px;">(neueste)</span>
+                            {% endif %}
+                        {% else %}
+                            <em style="color:#999;">Kein Inhalt</em>
+                        {% endif %}
+                    </div>
+                    <div class="actions">
+                        <form method="POST" action="{{ url_for('select_newest_for_display', display_id=d.id) }}">
+                            <button type="submit" class="btn-sm">Neueste anzeigen</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('regenerate_renders', display_id=d.id) }}"
+                              onsubmit="return confirm('Alle PDFs für dieses Display neu rendern?');">
+                            <button type="submit" class="btn-sm btn-secondary">PDFs neu rendern</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="display-settings-panel" id="settings-{{ d.id }}">
+                    <form method="POST" action="{{ url_for('update_display_settings', display_id=d.id) }}">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Name</label>
+                                <input type="text" name="name" value="{{ d.name }}" required>
+                            </div>
+                            <div class="form-group form-group-sm">
+                                <label>Breite (px)</label>
+                                <input type="number" name="width" value="{{ d.width }}" min="1" required>
+                            </div>
+                            <div class="form-group form-group-sm">
+                                <label>Höhe (px)</label>
+                                <input type="number" name="height" value="{{ d.height }}" min="1" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Seitenwechsel (Sek.)</label>
+                                <input type="number" name="cycle_interval" value="{{ d.cycle_interval }}" min="1" max="300" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Hintergrundfarbe</label>
+                                <input type="color" name="background_color" value="{{ d.background_color }}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Fortschrittsanzeige</label>
+                                <select name="progress_indicator" required>
+                                    <option value="progress"  {% if d.progress_indicator == 'progress'  %}selected{% endif %}>Fortschrittsbalken</option>
+                                    <option value="countdown" {% if d.progress_indicator == 'countdown' %}selected{% endif %}>Countdown</option>
+                                    <option value="none"      {% if d.progress_indicator == 'none'      %}selected{% endif %}>Keine</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-success">Speichern</button>
+                        <small style="color:#999;margin-left:10px;">Auflösungsänderung rendert alle PDFs neu.</small>
                     </form>
-                    <p style="margin-top: 8px; font-size: 12px; color: #666;">
-                        Löscht manuell alle PDFs, die älter als {{ auto_cleanup_days }} Tage sind.
-                        Die aktive PDF wird nicht gelöscht.
-                    </p>
                 </div>
             </div>
+            {% endfor %}
         </div>
 
-        <div class="section">
-            <h2>PDFs verwalten</h2>
-
-            {% if pdfs %}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Dateiname</th>
-                            <th>Upload-Datum</th>
-                            <th>Größe</th>
-                            <th>Status</th>
-                            <th>Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for pdf in pdfs %}
-                            <tr>
-                                <td>
-                                    <span class="original-name" onclick="toggleRename({{ pdf['id'] }})">
-                                        {{ pdf['original_name'] }}
-                                    </span>
-                                    <form method="POST" action="{{ url_for('rename_pdf', pdf_id=pdf['id']) }}"
-                                          class="rename-form" id="rename-{{ pdf['id'] }}">
-                                        <input type="text" name="new_name" value="{{ pdf['original_name'] }}" required>
-                                        <button type="submit" class="btn-sm">Speichern</button>
-                                        <button type="button" class="btn-sm btn-danger"
-                                                onclick="toggleRename({{ pdf['id'] }})">Abbrechen</button>
-                                    </form>
-                                </td>
-                                <td>{{ pdf['upload_date'][:19] }}</td>
-                                <td>{{ "%.2f"|format(pdf['file_size'] / 1024 / 1024) }} MB</td>
-                                <td>
-                                    {% if selected_id == pdf['id'] %}
-                                        <span class="badge">Ausgewählt</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <div class="actions">
-                                        <form method="POST" action="{{ url_for('select_pdf', pdf_id=pdf['id']) }}">
-                                            <button type="submit" class="btn-sm btn-success">Auswählen</button>
-                                        </form>
-                                        <a href="{{ url_for('serve_pdf', filename=pdf['filename']) }}"
-                                           download="{{ pdf['original_name'] }}"
-                                           class="btn btn-sm btn-info">Herunterladen</a>
-                                        <form method="POST" action="{{ url_for('delete_pdf_file', pdf_id=pdf['id']) }}"
-                                              onsubmit="return confirm('Sind Sie sicher, dass Sie diese Datei löschen möchten?');">
-                                            <button type="submit" class="btn-sm btn-danger">Löschen</button>
-                                        </form>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-
-                {% if total_pages > 1 %}
-                    <div class="pagination">
-                        {% if page > 1 %}
-                            <a href="{{ url_for('admin', page=page-1) }}">Zurück</a>
-                        {% endif %}
-
-                        {% for p in range(1, total_pages + 1) %}
-                            {% if p == page %}
-                                <span class="current">{{ p }}</span>
-                            {% else %}
-                                <a href="{{ url_for('admin', page=p) }}">{{ p }}</a>
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if page < total_pages %}
-                            <a href="{{ url_for('admin', page=page+1) }}">Weiter</a>
-                        {% endif %}
+        <div class="form-bg">
+            <h2 style="font-size:16px;margin-bottom:12px;">Neues Display hinzufügen</h2>
+            <form method="POST" action="{{ url_for('create_display_route') }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" name="name" placeholder="z.B. Empfang" required>
                     </div>
-                {% endif %}
-            {% else %}
-                <p>Noch keine PDF-Dateien hochgeladen.</p>
-            {% endif %}
+                    <div class="form-group">
+                        <label>URL-Kürzel</label>
+                        <input type="text" name="slug" placeholder="z.B. empfang"
+                               pattern="[a-z0-9][a-z0-9\-]*" title="Nur Kleinbuchstaben, Ziffern und Bindestriche" required>
+                    </div>
+                    <div class="form-group form-group-sm">
+                        <label>Breite (px)</label>
+                        <input type="number" name="width" value="1920" min="1" required>
+                    </div>
+                    <div class="form-group form-group-sm">
+                        <label>Höhe (px)</label>
+                        <input type="number" name="height" value="1080" min="1" required>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                        <button type="submit">Hinzufügen</button>
+                    </div>
+                </div>
+            </form>
         </div>
     </div>
 
-    <script>
-        function toggleRename(pdfId) {
-            const form = document.getElementById('rename-' + pdfId);
-            form.classList.toggle('active');
-        }
-    </script>
+    <!-- ===== UPLOAD ===== -->
+    <div class="section">
+        <h2>Inhalt hochladen</h2>
+        <div class="form-bg">
+            <form method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Datei (PDF, Bild JPG/PNG/GIF/WebP, Video MP4/WebM/MOV)</label>
+                        <input type="file" name="file" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.mp4,.webm,.mov" required>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                        <button type="submit">Hochladen</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="form-bg">
+            <form method="POST" action="{{ url_for('add_url') }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" name="name" placeholder="z.B. Firmen-Website" required>
+                    </div>
+                    <div class="form-group" style="flex:2;">
+                        <label>URL oder YouTube-Link</label>
+                        <input type="url" name="url" placeholder="https://..." required>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                        <button type="submit">Hinzufügen</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===== MEDIA LIBRARY ===== -->
+    {% set type_labels = {'pdf': 'PDF', 'image': 'Bild', 'video': 'Video', 'youtube': 'YouTube', 'url': 'Website'} %}
+
+    <div class="section">
+        <h2>Medienbibliothek</h2>
+
+        {% if media_list %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Typ</th>
+                        <th>Datum</th>
+                        <th>Größe</th>
+                        <th>Anzeigen auf</th>
+                        <th>Aktionen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for item in media_list %}
+                    <tr>
+                        <td>
+                            <span class="original-name" onclick="toggleRename({{ item.id }})">{{ item.original_name }}</span>
+                            <form method="POST" action="{{ url_for('rename_media', media_id=item.id) }}"
+                                  class="rename-form" id="rename-{{ item.id }}">
+                                <input type="text" name="new_name" value="{{ item.original_name }}" required>
+                                <button type="submit" class="btn-sm">OK</button>
+                                <button type="button" class="btn-sm btn-danger" onclick="toggleRename({{ item.id }})">✕</button>
+                            </form>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ item.content_type }}">
+                                {{ type_labels.get(item.content_type, item.content_type) }}
+                            </span>
+                        </td>
+                        <td style="white-space:nowrap;">{{ item.upload_date[:10] }}</td>
+                        <td style="white-space:nowrap;">
+                            {% if item.file_size > 0 %}
+                                {{ "%.1f"|format(item.file_size / 1024 / 1024) }} MB
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="actions">
+                                {% for d in displays %}
+                                    {% if d.id in selected_on.get(item.id, []) %}
+                                        <span class="badge badge-active" title="{{ d.name }}">{{ d.name }}</span>
+                                    {% else %}
+                                        <form method="POST" action="{{ url_for('select_for_display', display_id=d.id, media_id=item.id) }}">
+                                            <button type="submit" class="btn-sm btn-success" title="Auf {{ d.name }} anzeigen">{{ d.name }}</button>
+                                        </form>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="actions">
+                                {% if item.filename %}
+                                    <a href="{{ url_for('serve_upload', filename=item.filename) }}"
+                                       download="{{ item.original_name }}"
+                                       class="btn btn-sm btn-info">↓</a>
+                                {% endif %}
+                                <form method="POST" action="{{ url_for('delete_media_item', media_id=item.id) }}"
+                                      onsubmit="return confirm('&quot;{{ item.original_name }}&quot; wirklich löschen?');">
+                                    <button type="submit" class="btn-sm btn-danger">Löschen</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            {% if total_pages > 1 %}
+            <div class="pagination">
+                {% if page > 1 %}<a href="{{ url_for('admin', page=page-1) }}">← Zurück</a>{% endif %}
+                {% for p in range(1, total_pages + 1) %}
+                    {% if p == page %}
+                        <span class="current">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ url_for('admin', page=p) }}">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+                {% if page < total_pages %}<a href="{{ url_for('admin', page=page+1) }}">Weiter →</a>{% endif %}
+            </div>
+            {% endif %}
+
+        {% else %}
+            <p style="color:#999;">Noch keine Inhalte vorhanden.</p>
+        {% endif %}
+    </div>
+
+    <!-- ===== GLOBAL SETTINGS ===== -->
+    <div class="section">
+        <h2>Globale Einstellungen</h2>
+        <div class="form-bg">
+            <form method="POST" action="{{ url_for('update_global_settings') }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Automatisches Löschen alter Dateien</label>
+                        <select name="auto_cleanup_enabled" required>
+                            <option value="true"  {% if auto_cleanup_enabled == 'true'  %}selected{% endif %}>Aktiviert</option>
+                            <option value="false" {% if auto_cleanup_enabled == 'false' %}selected{% endif %}>Deaktiviert</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-sm">
+                        <label>Aufbewahrung (Tage)</label>
+                        <input type="number" name="auto_cleanup_days" value="{{ auto_cleanup_days }}" min="1" max="3650" required>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                        <button type="submit">Speichern</button>
+                    </div>
+                </div>
+            </form>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid #ddd;">
+                <form method="POST" action="{{ url_for('manual_cleanup') }}"
+                      onsubmit="return confirm('Dateien älter als {{ auto_cleanup_days }} Tage löschen (aktive Inhalte bleiben erhalten)?');">
+                    <button type="submit" class="btn-info btn-sm">Jetzt aufräumen</button>
+                </form>
+                <p style="margin-top:6px;font-size:12px;color:#999;">
+                    Aktive Inhalte werden nie automatisch gelöscht.
+                </p>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function toggleRename(id) {
+        document.getElementById('rename-' + id).classList.toggle('active');
+    }
+    function togglePanel(id) {
+        var el = document.getElementById(id);
+        el.style.display = el.style.display === 'block' ? 'none' : 'block';
+    }
+</script>
 </body>
 </html>
