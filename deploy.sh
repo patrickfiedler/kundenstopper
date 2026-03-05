@@ -17,7 +17,7 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 # Check if Python 3 is installed
-echo -e "${YELLOW}[1/7] Checking Python 3...${NC}"
+echo -e "${YELLOW}[1/8] Checking Python 3...${NC}"
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}Error: Python 3 is not installed${NC}"
     echo "Please install Python 3 first: sudo apt install python3 python3-pip"
@@ -28,7 +28,7 @@ echo -e "${GREEN}✓ Found: $PYTHON_VERSION${NC}"
 echo ""
 
 # Check if pip is installed
-echo -e "${YELLOW}[2/7] Checking pip...${NC}"
+echo -e "${YELLOW}[2/8] Checking pip...${NC}"
 if ! python3 -m pip --version &> /dev/null; then
     echo -e "${RED}Error: pip is not installed${NC}"
     echo "Please install pip: sudo apt install python3-pip"
@@ -38,7 +38,7 @@ echo -e "${GREEN}✓ pip is installed${NC}"
 echo ""
 
 # Ask about virtual environment
-echo -e "${YELLOW}[3/7] Virtual Environment Setup${NC}"
+echo -e "${YELLOW}[3/8] Virtual Environment Setup${NC}"
 echo "Do you want to use a virtual environment? (recommended)"
 read -p "Use venv? [Y/n]: " use_venv
 use_venv=${use_venv:-Y}
@@ -66,13 +66,13 @@ fi
 echo ""
 
 # Install dependencies
-echo -e "${YELLOW}[4/7] Installing Python dependencies...${NC}"
+echo -e "${YELLOW}[4/8] Installing Python dependencies...${NC}"
 python3 -m pip install -r "$SCRIPT_DIR/requirements.txt" --upgrade
 echo -e "${GREEN}✓ Dependencies installed${NC}"
 echo ""
 
 # Create uploads directory
-echo -e "${YELLOW}[5/7] Creating uploads directory...${NC}"
+echo -e "${YELLOW}[5/8] Creating uploads directory...${NC}"
 UPLOADS_DIR="$SCRIPT_DIR/uploads"
 if [ ! -d "$UPLOADS_DIR" ]; then
     mkdir -p "$UPLOADS_DIR"
@@ -83,7 +83,7 @@ fi
 echo ""
 
 # Create config.json if it doesn't exist
-echo -e "${YELLOW}[6/7] Configuration Setup${NC}"
+echo -e "${YELLOW}[6/8] Configuration Setup${NC}"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 
 if [ -f "$CONFIG_FILE" ]; then
@@ -155,8 +155,37 @@ PYEOF
 fi
 echo ""
 
+# Deployment target for update.sh
+echo -e "${YELLOW}[7/8] Deployment Target${NC}"
+echo "What should update.sh pull when you run it later?"
+echo "  1) Always use the latest commit (main branch)"
+echo "  2) Pin to a specific tag"
+read -p "Choice [1]: " target_choice
+target_choice=${target_choice:-1}
+
+if [[ $target_choice == "2" ]]; then
+    echo ""
+    echo "Available tags:"
+    git tag -l | sort -V | tail -10
+    echo ""
+    read -p "Tag name (e.g. v1.0): " deploy_target_tag
+    cat > "$SCRIPT_DIR/deployment.conf" << DEPLOYEOF
+TARGET_TYPE=tag
+TARGET_VALUE=$deploy_target_tag
+DEPLOYEOF
+    echo -e "${GREEN}✓ update.sh will use tag: $deploy_target_tag${NC}"
+else
+    cat > "$SCRIPT_DIR/deployment.conf" << DEPLOYEOF
+TARGET_TYPE=latest
+TARGET_VALUE=main
+DEPLOYEOF
+    echo -e "${GREEN}✓ update.sh will always use latest commit on main${NC}"
+fi
+echo -e "   Change later with: ${BLUE}bash update.sh --tag v1.x${NC}  or  ${BLUE}bash update.sh --latest${NC}"
+echo ""
+
 # Setup systemd service (optional)
-echo -e "${YELLOW}[7/7] Systemd Service Setup${NC}"
+echo -e "${YELLOW}[8/8] Systemd Service Setup${NC}"
 echo "Do you want to set up the systemd service?"
 echo "(This will allow the app to start automatically on boot)"
 read -p "Setup systemd service? [y/N]: " setup_service

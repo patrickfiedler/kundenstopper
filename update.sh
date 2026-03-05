@@ -1,205 +1,225 @@
 #!/bin/bash
-set -e  # Exit on error
+set -e
 
-# Colors for output
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_CONF="$SCRIPT_DIR/deployment.conf"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NC='\033[0m'
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Kundenstopper Update Script${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# Check if this is a git repository
+# Sanity checks
 if [ ! -d "$SCRIPT_DIR/.git" ]; then
-    echo -e "${RED}Error: Not a git repository${NC}"
-    echo "This script only works with git-cloned installations"
-    echo "Please use deploy.sh for initial setup"
-    exit 1
+    echo -e "${RED}Error: Not a git repository. Run deploy.sh first.${NC}"; exit 1
 fi
-
-# Check if config.json exists
 if [ ! -f "$SCRIPT_DIR/config.json" ]; then
-    echo -e "${RED}Error: config.json not found${NC}"
-    echo "Please run deploy.sh first for initial setup"
-    exit 1
+    echo -e "${RED}Error: config.json not found. Run deploy.sh first.${NC}"; exit 1
 fi
 
-# Detect if using systemd service
+# ---------- Parse arguments ----------
+SKIP_SELF_UPDATE=false
+TARGET_TYPE_OVERRIDE=""
+TARGET_VALUE_OVERRIDE=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --skip-self-update) SKIP_SELF_UPDATE=true; shift ;;
+        --latest) TARGET_TYPE_OVERRIDE=latest; TARGET_VALUE_OVERRIDE=main; shift ;;
+        --tag)
+            if [[ -z $2 || $2 == --* ]]; then
+                echo -e "${RED}--tag requires a tag name, e.g.: bash update.sh --tag v1.2${NC}"; exit 1
+            fi
+            TARGET_TYPE_OVERRIDE=tag; TARGET_VALUE_OVERRIDE="$2"; shift 2 ;;
+        *) echo -e "${RED}Unknown argument: $1${NC}"
+           echo "Usage: $0 [--latest | --tag <tagname>]"; exit 1 ;;
+    esac
+done
+
+# ---------- Load and apply deployment config ----------
+TARGET_TYPE=latest
+TARGET_VALUE=main
+
+if [ -f "$DEPLOY_CONF" ]; then
+    # shellcheck source=/dev/null
+    source "$DEPLOY_CONF"
+else
+    echo -e "${YELLOW}No deployment.conf found. Defaulting to latest (main).${NC}"
+    echo -e "Run deploy.sh first, or pass ${BLUE}--latest${NC} / ${BLUE}--tag <name>${NC}."
+    echo ""
+fi
+
+if [ -n "$TARGET_TYPE_OVERRIDE" ]; then
+    TARGET_TYPE=$TARGET_TYPE_OVERRIDE
+    TARGET_VALUE=$TARGET_VALUE_OVERRIDE
+    printf 'TARGET_TYPE=%s\nTARGET_VALUE=%s\n' "$TARGET_TYPE" "$TARGET_VALUE" > "$DEPLOY_CONF"
+    echo -e "${GREEN}Deployment target updated: $TARGET_TYPE ($TARGET_VALUE)${NC}"
+    echo ""
+fi
+
+echo -e "${BLUE}Target: $TARGET_TYPE ($TARGET_VALUE)${NC}"
+
+# Detect venv and service
 USING_SYSTEMD=false
-if systemctl is-active --quiet kundenstopper 2>/dev/null; then
-    USING_SYSTEMD=true
-    echo -e "${BLUE}Detected running systemd service${NC}"
+systemctl is-active --quiet kundenstopper 2>/dev/null && USING_SYSTEMD=true
+
+if [ -d "$SCRIPT_DIR/venv" ]; then
+    PYTHON="$SCRIPT_DIR/venv/bin/python3"
+    PIP="$SCRIPT_DIR/venv/bin/pip3"
+    echo -e "${BLUE}Using virtual environment${NC}"
+else
+    PYTHON=python3
+    PIP="python3 -m pip"
 fi
 
-# Detect if using virtual environment
-USING_VENV=false
-VENV_DIR="$SCRIPT_DIR/venv"
-if [ -d "$VENV_DIR" ]; then
-    USING_VENV=true
-    echo -e "${BLUE}Detected virtual environment${NC}"
+[ "$USING_SYSTEMD" = true ] && echo -e "${BLUE}Detected running systemd service${NC}"
+echo ""
+
+# Resolve the git ref to compare against / check out
+if [ "$TARGET_TYPE" = tag ]; then
+    COMPARE_REF="$TARGET_VALUE"
+else
+    COMPARE_REF="origin/$TARGET_VALUE"
 fi
-echo ""
 
-# Create backup tag before updating
-echo -e "${YELLOW}[1/6] Creating backup tag...${NC}"
-BACKUP_TAG="backup-$(date +%Y%m%d-%H%M%S)"
-git tag "$BACKUP_TAG"
-echo -e "${GREEN}✓ Backup tag created: $BACKUP_TAG${NC}"
-echo "  (To rollback: git reset --hard $BACKUP_TAG)"
-echo ""
-
-# Store current commit for comparison
-CURRENT_COMMIT=$(git rev-parse HEAD)
-
-# Fetch updates
-echo -e "${YELLOW}[2/6] Fetching updates from GitHub...${NC}"
-git fetch origin
+# ---------- [1/5] Fetch + self-update check ----------
+echo -e "${YELLOW}[1/5] Fetching from remote...${NC}"
+git -C "$SCRIPT_DIR" fetch origin
+[ "$TARGET_TYPE" = tag ] && git -C "$SCRIPT_DIR" fetch --tags 2>/dev/null || true
 echo -e "${GREEN}✓ Fetch complete${NC}"
+
+if [ "$SKIP_SELF_UPDATE" = false ]; then
+    if ! git -C "$SCRIPT_DIR" diff --quiet HEAD "$COMPARE_REF" -- update.sh 2>/dev/null; then
+        echo -e "${YELLOW}update.sh has been updated — restarting with new version...${NC}"
+        git -C "$SCRIPT_DIR" show "$COMPARE_REF:update.sh" > "$SCRIPT_DIR/update.sh"
+        chmod +x "$SCRIPT_DIR/update.sh"
+        exec bash "$SCRIPT_DIR/update.sh" "$@" --skip-self-update
+    fi
+    echo -e "${GREEN}✓ update.sh is current${NC}"
+fi
 echo ""
 
-# Check if there are updates
-BEHIND_COUNT=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
+# ---------- Show what has changed ----------
+CURRENT_COMMIT=$(git -C "$SCRIPT_DIR" rev-parse HEAD)
+
+if [ "$TARGET_TYPE" = tag ]; then
+    BEHIND_COUNT=$(git -C "$SCRIPT_DIR" rev-list "HEAD..$TARGET_VALUE" --count 2>/dev/null || echo 0)
+else
+    BEHIND_COUNT=$(git -C "$SCRIPT_DIR" rev-list "HEAD..origin/$TARGET_VALUE" --count 2>/dev/null || echo 0)
+fi
 
 if [ "$BEHIND_COUNT" -eq 0 ]; then
-    echo -e "${GREEN}Already up to date!${NC}"
-    echo "No updates available."
+    echo -e "${GREEN}Already up to date. Nothing to do.${NC}"
     exit 0
 fi
 
-echo -e "${BLUE}Updates available: $BEHIND_COUNT commit(s)${NC}"
-echo ""
-echo -e "${BLUE}Recent changes:${NC}"
-git log HEAD..origin/main --oneline --max-count=5
+echo -e "${BLUE}$BEHIND_COUNT new commit(s):${NC}"
+git -C "$SCRIPT_DIR" log HEAD.."$COMPARE_REF" --oneline --max-count=10
 echo ""
 
-read -p "Continue with update? [Y/n]: " continue_update
-continue_update=${continue_update:-Y}
-
-if [[ ! $continue_update =~ ^[Yy]$ ]]; then
-    echo "Update cancelled"
-    git tag -d "$BACKUP_TAG"  # Remove backup tag
+read -p "Continue with update? [Y/n]: " do_update
+do_update=${do_update:-Y}
+if [[ ! $do_update =~ ^[Yy]$ ]]; then
+    echo "Update cancelled."
     exit 0
 fi
 echo ""
 
-# Stop service if running
+# ---------- [2/5] Backup tag ----------
+echo -e "${YELLOW}[2/5] Creating backup tag...${NC}"
+BACKUP_TAG="backup-$(date +%Y%m%d-%H%M%S)"
+git -C "$SCRIPT_DIR" tag "$BACKUP_TAG"
+echo -e "${GREEN}✓ Backup tag: $BACKUP_TAG${NC}"
+echo "  Rollback: git reset --hard $BACKUP_TAG && sudo systemctl restart kundenstopper"
+echo ""
+
+# ---------- [3/5] Stop service, pull code ----------
+echo -e "${YELLOW}[3/5] Updating code...${NC}"
 if [ "$USING_SYSTEMD" = true ]; then
-    echo -e "${YELLOW}[3/6] Stopping service...${NC}"
     sudo systemctl stop kundenstopper
-    echo -e "${GREEN}✓ Service stopped${NC}"
-    echo ""
-else
-    echo -e "${YELLOW}[3/6] No service to stop${NC}"
-    echo -e "${YELLOW}⚠ Warning: Make sure the app is not running manually${NC}"
-    read -p "Press Enter to continue..."
-    echo ""
+    echo "Service stopped."
 fi
 
-# Pull updates
-echo -e "${YELLOW}[4/6] Pulling updates...${NC}"
-git pull origin main
-NEW_COMMIT=$(git rev-parse HEAD)
-echo -e "${GREEN}✓ Code updated${NC}"
+if [ "$TARGET_TYPE" = tag ]; then
+    git -C "$SCRIPT_DIR" checkout "$TARGET_VALUE"
+else
+    CURRENT_BRANCH=$(git -C "$SCRIPT_DIR" symbolic-ref --short HEAD 2>/dev/null || echo DETACHED)
+    if [ "$CURRENT_BRANCH" != "$TARGET_VALUE" ]; then
+        git -C "$SCRIPT_DIR" checkout "$TARGET_VALUE"
+    fi
+    git -C "$SCRIPT_DIR" reset --hard "origin/$TARGET_VALUE"
+fi
+
+NEW_COMMIT=$(git -C "$SCRIPT_DIR" rev-parse HEAD)
+echo -e "${GREEN}✓ Code updated: ${CURRENT_COMMIT:0:7} → ${NEW_COMMIT:0:7}${NC}"
 echo ""
 
-# Check if requirements.txt changed
-echo -e "${YELLOW}[5/6] Checking dependencies...${NC}"
-if git diff "$CURRENT_COMMIT" "$NEW_COMMIT" --name-only | grep -q "requirements.txt"; then
-    echo -e "${YELLOW}requirements.txt has changed, updating dependencies...${NC}"
+# ---------- [4/5] Dependencies + migrations ----------
+echo -e "${YELLOW}[4/5] Dependencies and database migrations...${NC}"
+mkdir -p "$SCRIPT_DIR/uploads" "$SCRIPT_DIR/renders"
 
-    if [ "$USING_VENV" = true ]; then
-        source "$VENV_DIR/bin/activate"
-        echo "Using virtual environment"
-    fi
-
-    python3 -m pip install -r "$SCRIPT_DIR/requirements.txt" --upgrade
+if git -C "$SCRIPT_DIR" diff "$CURRENT_COMMIT" "$NEW_COMMIT" --name-only 2>/dev/null | grep -q "requirements.txt"; then
+    echo "requirements.txt changed — updating dependencies..."
+    $PIP install -q -r "$SCRIPT_DIR/requirements.txt" --upgrade
     echo -e "${GREEN}✓ Dependencies updated${NC}"
 else
     echo -e "${GREEN}✓ No dependency changes${NC}"
 fi
-echo ""
 
-# Check if config.json.example changed
-if git diff "$CURRENT_COMMIT" "$NEW_COMMIT" --name-only | grep -q "config.json.example"; then
-    echo -e "${YELLOW}⚠ config.json.example has changed!${NC}"
-    echo "New configuration options may be available."
-    echo "Please review config.json.example and update your config.json if needed"
+if git -C "$SCRIPT_DIR" diff "$CURRENT_COMMIT" "$NEW_COMMIT" --name-only 2>/dev/null | grep -q "config.json.example"; then
+    echo -e "${YELLOW}⚠ config.json.example has changed — new options may be available.${NC}"
+    read -p "  View diff? [y/N]: " view_conf
+    [[ $view_conf =~ ^[Yy]$ ]] && git -C "$SCRIPT_DIR" diff "$CURRENT_COMMIT" "$NEW_COMMIT" -- config.json.example
     echo ""
-
-    read -p "View changes to config.json.example? [y/N]: " view_config
-    if [[ $view_config =~ ^[Yy]$ ]]; then
-        echo ""
-        git diff "$CURRENT_COMMIT" "$NEW_COMMIT" -- config.json.example
-        echo ""
-    fi
 fi
 
-# Restart service if it was running
+echo "Running database migrations..."
+cd "$SCRIPT_DIR" && $PYTHON migrate.py
+echo ""
+
+# ---------- [5/5] Restart service ----------
+echo -e "${YELLOW}[5/5] Starting service...${NC}"
 if [ "$USING_SYSTEMD" = true ]; then
-    echo -e "${YELLOW}[6/6] Starting service...${NC}"
     sudo systemctl start kundenstopper
-
-    # Wait a moment for service to start
     sleep 2
-
-    # Check if service started successfully
     if systemctl is-active --quiet kundenstopper; then
-        echo -e "${GREEN}✓ Service started successfully${NC}"
-        echo ""
-        echo "Checking service status..."
-        sudo systemctl status kundenstopper --no-pager -l || true
+        echo -e "${GREEN}✓ Service started${NC}"
     else
-        echo -e "${RED}✗ Service failed to start!${NC}"
+        echo -e "${RED}Service failed to start!${NC}"
+        echo "Logs: sudo journalctl -u kundenstopper -n 50"
         echo ""
-        echo "Checking logs..."
-        sudo journalctl -u kundenstopper -n 20 --no-pager
-        echo ""
-        echo -e "${RED}Update may have introduced issues${NC}"
         echo -e "${YELLOW}To rollback:${NC}"
-        echo "  cd $SCRIPT_DIR"
-        echo "  git reset --hard $BACKUP_TAG"
+        echo "  git -C $SCRIPT_DIR reset --hard $BACKUP_TAG"
         echo "  sudo systemctl restart kundenstopper"
         exit 1
     fi
 else
-    echo -e "${YELLOW}[6/6] No service to restart${NC}"
-    echo -e "${BLUE}Please start the app manually if needed${NC}"
+    echo -e "${YELLOW}Service not running. Start manually: python3 app.py${NC}"
 fi
 echo ""
 
-# Final summary
+# ---------- Summary ----------
+PORT=$($PYTHON -c "import json; print(json.load(open('$SCRIPT_DIR/config.json'))['port'])" 2>/dev/null || echo 8080)
+
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Update Complete!${NC}"
+echo -e "${GREEN}Update complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo -e "${BLUE}Updated from:${NC} ${CURRENT_COMMIT:0:7}"
-echo -e "${BLUE}Updated to:${NC}   ${NEW_COMMIT:0:7}"
+echo -e "${BLUE}Updated:${NC} ${CURRENT_COMMIT:0:7} → ${NEW_COMMIT:0:7}"
+echo -e "${BLUE}Backup:${NC}  git reset --hard $BACKUP_TAG"
 echo ""
-
-# Read port from config.json
-PORT=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/config.json'))['port'])")
-
-echo -e "${BLUE}Application URLs:${NC}"
-echo "  Display: http://localhost:$PORT/display"
+echo -e "${BLUE}URLs:${NC}"
 echo "  Admin:   http://localhost:$PORT/admin"
+for slug in $(cd "$SCRIPT_DIR" && $PYTHON -c "
+from models import get_all_displays
+for d in get_all_displays(): print(d['slug'])
+" 2>/dev/null); do
+    echo "  Display: http://localhost:$PORT/display/$slug"
+done
 echo ""
-
-if [ "$USING_SYSTEMD" = true ]; then
-    echo -e "${BLUE}Service Management:${NC}"
-    echo "  Status:  sudo systemctl status kundenstopper"
-    echo "  Logs:    sudo journalctl -u kundenstopper -f"
-    echo ""
-fi
-
-echo -e "${BLUE}Backup tag created:${NC} $BACKUP_TAG"
-echo "  To rollback: git reset --hard $BACKUP_TAG"
-echo ""
-
-echo -e "${GREEN}Update successful! 🚀${NC}"
