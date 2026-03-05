@@ -212,6 +212,46 @@ All playlist mutations are AJAX — the page never reloads.
 
 ---
 
+## Phase 1g: Image Galleries
+
+### Goal
+Allow multiple images to be grouped into a named gallery. A gallery is a single playlist item
+that cycles through its images, with the item's duration divided equally across them.
+Gallery images are stored separately from the regular media library (no clutter).
+
+### Design decisions
+- Galleries appear as `content_type='gallery'` in `media_items` — work in playlists and dropdowns automatically
+- Image files stored in `uploads/` but tracked only in `gallery_images` table, not `media_items`
+- Duration: playlist item duration ÷ image count (shown in admin as "~Xs/Bild")
+- Display handles galleries exactly like PDFs (pages = array of image URLs, same slide model)
+- Multiple galleries supported — each is an independent media item
+
+### DB Changes
+- `migrations/0005_galleries.py` — new `gallery_images` table: `id`, `media_id` (FK), `filename`, `original_name`, `file_size`, `position`
+
+### Backend
+- [x] `models.py`: `add_gallery`, `get_gallery_images`, `add_gallery_image`, `remove_gallery_image`, `reorder_gallery_images`
+- [x] `models.py`: `delete_media` cascades gallery image cleanup
+- [x] `models.py`: `init_db` creates `gallery_images` table on fresh install
+- [x] `app.py`: `_media_to_item` handles `gallery` type (pages = image URLs)
+- [x] `app.py`: `POST /admin/gallery/create`
+- [x] `app.py`: `POST /admin/gallery/<id>/upload` — batch image upload, AJAX
+- [x] `app.py`: `POST /admin/gallery/<id>/image/<img_id>/remove` — AJAX
+- [x] `app.py`: `POST /admin/gallery/<id>/image/reorder` — AJAX
+
+### Frontend
+- [x] `display.html`: gallery handled same as pdf in `buildSlides()` and single-item mode; `getStateKey` updated
+- [x] `admin.html`: gallery creation form in upload section
+- [x] `admin.html`: "Bilder (N)" button in media library → inline gallery editor row
+- [x] `admin.html`: gallery editor — sortable images (SortableJS), batch upload, remove
+- [x] `admin.html`: playlist duration annotation shows "~Xs/Bild" for gallery items
+- [x] `admin.html`: fix 's' label alignment on dur-input (CSS specificity bug)
+
+### Migration
+- [x] `migrations/0005_galleries.py`
+
+---
+
 ## Phase 2: Smart TV Optimization
 
 ### Goal
@@ -275,7 +315,7 @@ Proposed layouts:
 ---
 
 ## Status
-**Phases 1–1f complete. Phase 2 (Smart TV) when hardware available.**
+**Phases 1–1g complete. Phase 2 (Smart TV) when hardware available.**
 
 ## Decisions Made
 - PDF pre-rendering: one PNG per page per display, stored in `renders/<display_id>/` directory

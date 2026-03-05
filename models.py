@@ -76,6 +76,17 @@ def init_db():
         ''')
 
         conn.execute('''
+            CREATE TABLE IF NOT EXISTS gallery_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                file_size INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 0
+            )
+        ''')
+
+        conn.execute('''
             CREATE TABLE IF NOT EXISTS playlist_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 display_id INTEGER NOT NULL,
@@ -316,6 +327,13 @@ def delete_media(media_id):
             (media_id,)
         ).fetchall()
 
+        gallery_images = []
+        if item['content_type'] == 'gallery':
+            gallery_images = conn.execute(
+                'SELECT filename FROM gallery_images WHERE media_id = ?', (media_id,)
+            ).fetchall()
+            conn.execute('DELETE FROM gallery_images WHERE media_id = ?', (media_id,))
+
         conn.execute('DELETE FROM pdf_renders WHERE media_id = ?', (media_id,))
         conn.execute('DELETE FROM playlist_items WHERE media_id = ?', (media_id,))
         conn.execute('DELETE FROM media_items WHERE id = ?', (media_id,))
@@ -327,6 +345,7 @@ def delete_media(media_id):
         return {
             'filename': item['filename'],
             'renders': [(r['display_id'], r['render_filename']) for r in renders],
+            'gallery_images': [r['filename'] for r in gallery_images],
         }
 
 
@@ -529,3 +548,66 @@ def move_playlist_item(item_id, display_id, direction):
         pos_b = items[swap_idx]['position']
         conn.execute('UPDATE playlist_items SET position = ? WHERE id = ?', (pos_b, ids[idx]))
         conn.execute('UPDATE playlist_items SET position = ? WHERE id = ?', (pos_a, ids[swap_idx]))
+
+
+# ---------- galleries ----------
+
+def add_gallery(name):
+    with get_db() as conn:
+        conn.execute(
+            'INSERT INTO media_items (content_type, original_name, upload_date, file_size) VALUES (?, ?, ?, ?)',
+            ('gallery', name, datetime.now(), 0)
+        )
+        return conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+
+def get_gallery_images(media_id):
+    with get_db() as conn:
+        return conn.execute(
+            'SELECT * FROM gallery_images WHERE media_id = ? ORDER BY position',
+            (media_id,)
+        ).fetchall()
+
+
+def add_gallery_image(media_id, filename, original_name, file_size):
+    with get_db() as conn:
+        max_pos = conn.execute(
+            'SELECT COALESCE(MAX(position), 0) FROM gallery_images WHERE media_id = ?',
+            (media_id,)
+        ).fetchone()[0]
+        conn.execute(
+            'INSERT INTO gallery_images (media_id, filename, original_name, file_size, position) VALUES (?, ?, ?, ?, ?)',
+            (media_id, filename, original_name, file_size, max_pos + 1)
+        )
+        return conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+
+def remove_gallery_image(image_id, media_id):
+    """Delete one image from a gallery. Returns filename for filesystem cleanup, or None."""
+    with get_db() as conn:
+        row = conn.execute(
+            'SELECT filename FROM gallery_images WHERE id = ? AND media_id = ?',
+            (image_id, media_id)
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            'DELETE FROM gallery_images WHERE id = ? AND media_id = ?',
+            (image_id, media_id)
+        )
+        items = conn.execute(
+            'SELECT id FROM gallery_images WHERE media_id = ? ORDER BY position',
+            (media_id,)
+        ).fetchall()
+        for i, r in enumerate(items, 1):
+            conn.execute('UPDATE gallery_images SET position = ? WHERE id = ?', (i, r['id']))
+        return row['filename']
+
+
+def reorder_gallery_images(media_id, ordered_ids):
+    with get_db() as conn:
+        for i, image_id in enumerate(ordered_ids, 1):
+            conn.execute(
+                'UPDATE gallery_images SET position = ? WHERE id = ? AND media_id = ?',
+                (i, image_id, media_id)
+            )

@@ -26,6 +26,8 @@ from models import (
     update_media_url,
     get_playlist_items, add_playlist_item, remove_playlist_item,
     update_playlist_item_duration, move_playlist_item, reorder_playlist_items,
+    add_gallery, get_gallery_images, add_gallery_image,
+    remove_gallery_image, reorder_gallery_images,
 )
 
 app = Flask(__name__)
@@ -243,6 +245,12 @@ def _media_to_item(media, display):
             url_for('serve_render', display_id=display['id'], filename=r['render_filename'])
             for r in renders
         ]
+    elif media['content_type'] == 'gallery':
+        images = get_gallery_images(media['id'])
+        item['pages'] = [
+            url_for('serve_upload', filename=img['filename'])
+            for img in images
+        ]
     elif media['content_type'] in ('image', 'video'):
         item['url'] = url_for('serve_upload', filename=media['filename'])
         if media['content_type'] == 'video':
@@ -445,6 +453,13 @@ def admin():
         if item['content_type'] == 'youtube' and item['url']
     }
 
+    gallery_images_map = {
+        item['id']: get_gallery_images(item['id'])
+        for item in all_media
+        if item['content_type'] == 'gallery'
+    }
+    gallery_image_counts = {mid: len(imgs) for mid, imgs in gallery_images_map.items()}
+
     return render_template(
         'admin.html',
         displays=displays,
@@ -458,6 +473,8 @@ def admin():
         auto_cleanup_enabled=auto_cleanup_enabled,
         auto_cleanup_days=auto_cleanup_days,
         youtube_params=youtube_params,
+        gallery_images_map=gallery_images_map,
+        gallery_image_counts=gallery_image_counts,
     )
 
 
@@ -691,6 +708,75 @@ def playlist_move_item(display_id, item_id, direction):
     return redirect(url_for('admin'))
 
 
+@app.route('/admin/gallery/create', methods=['POST'])
+@login_required
+def gallery_create():
+    name = request.form.get('name', '').strip()
+    if not name:
+        flash('Name darf nicht leer sein', 'error')
+        return redirect(url_for('admin'))
+    add_gallery(name)
+    flash(f'Galerie "{name}" erstellt', 'success')
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/gallery/<int:gallery_id>/upload', methods=['POST'])
+@login_required
+def gallery_upload(gallery_id):
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    media = get_media(gallery_id)
+    if not media or media['content_type'] != 'gallery':
+        if is_ajax:
+            return jsonify({'ok': False, 'error': 'Galerie nicht gefunden'}), 404
+        flash('Galerie nicht gefunden', 'error')
+        return redirect(url_for('admin'))
+
+    files = request.files.getlist('files')
+    uploaded = []
+    for file in files:
+        if not file.filename:
+            continue
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        if ext not in ('jpg', 'jpeg', 'png', 'gif', 'webp'):
+            continue
+        original_name = secure_filename(file.filename)
+        unique_filename = f'{uuid.uuid4()}.{ext}'
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(filepath)
+        file_size = os.path.getsize(filepath)
+        new_id = add_gallery_image(gallery_id, unique_filename, original_name, file_size)
+        uploaded.append({'id': new_id, 'filename': unique_filename, 'original_name': original_name})
+
+    if is_ajax:
+        return jsonify({'ok': True, 'images': uploaded})
+    flash(f'{len(uploaded)} Bild(er) hochgeladen', 'success')
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/gallery/<int:gallery_id>/image/<int:image_id>/remove', methods=['POST'])
+@login_required
+def gallery_remove_image(gallery_id, image_id):
+    filename = remove_gallery_image(image_id, gallery_id)
+    if filename:
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'ok': True})
+    return redirect(url_for('admin'))
+
+
+@app.route('/admin/gallery/<int:gallery_id>/image/reorder', methods=['POST'])
+@login_required
+def gallery_reorder_images(gallery_id):
+    ordered_ids = request.json.get('order', [])
+    reorder_gallery_images(gallery_id, ordered_ids)
+    return jsonify({'ok': True})
+
+
 @app.route('/admin/display/<int:display_id>/regenerate', methods=['POST'])
 @login_required
 def regenerate_renders(display_id):
@@ -871,6 +957,15 @@ def delete_media_item(media_id):
         if os.path.exists(render_path):
             try:
                 os.remove(render_path)
+            except OSError:
+                pass
+
+    # Delete gallery image files
+    for gal_filename in result.get('gallery_images', []):
+        gal_path = os.path.join(app.config['UPLOAD_FOLDER'], gal_filename)
+        if os.path.exists(gal_path):
+            try:
+                os.remove(gal_path)
             except OSError:
                 pass
 

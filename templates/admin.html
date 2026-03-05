@@ -106,6 +106,7 @@
         .badge-video   { background: #6f42c1; }
         .badge-youtube { background: #dc3545; }
         .badge-url     { background: #6c757d; }
+        .badge-gallery { background: #e67e22; }
         .badge-active  { background: #28a745; }
 
         /* Pagination */
@@ -159,13 +160,23 @@
         .yt-opts-form input[type="checkbox"] { width: auto; margin: 0; }
         .yt-opts-form input[type="text"]  { width: 70px; padding: 5px 7px; font-size: 13px; }
 
+        /* Gallery editor */
+        .gallery-editor-row td { padding: 12px 16px; background: #f8f9fa; }
+        .gallery-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; }
+        .gallery-table td { padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
+        .gallery-table tr:last-child td { border-bottom: none; }
+        .gallery-drag-handle { cursor: grab; color: #bbb; width: 20px; user-select: none; }
+        .gallery-drag-handle:active { cursor: grabbing; }
+        .gallery-thumb { width: 60px; height: 40px; object-fit: cover; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+
         /* Playlist table */
         .playlist-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; }
         .playlist-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
         .playlist-table tr:last-child td { border-bottom: none; }
         .drag-handle { cursor: grab; color: #bbb; width: 20px; user-select: none; }
         .drag-handle:active { cursor: grabbing; }
-        .dur-input { width: 60px; padding: 4px 6px; font-size: 13px; border: 1px solid #ddd; border-radius: 4px; transition: border-color 0.4s; }
+        .dur-input { width: 60px !important; padding: 4px 6px; font-size: 13px; border: 1px solid #ddd; border-radius: 4px; transition: border-color 0.4s; }
+        .dur-cell { white-space: nowrap; }
 
         /* Active media row */
         tr.is-active td { background: #f0fdf4 !important; }
@@ -180,7 +191,7 @@
 </head>
 <body>
 <div class="container">
-    {% set type_labels = {'pdf': 'PDF', 'image': 'Bild', 'video': 'Video', 'youtube': 'YouTube', 'url': 'Website'} %}
+    {% set type_labels = {'pdf': 'PDF', 'image': 'Bild', 'video': 'Video', 'youtube': 'YouTube', 'url': 'Website', 'gallery': 'Galerie'} %}
 
     <header>
         <h1>Kundenstopper Verwaltung</h1>
@@ -295,10 +306,16 @@
                                     <span class="badge badge-{{ pi.content_type }}" style="font-size:10px;">{{ type_labels.get(pi.content_type, pi.content_type) }}</span>
                                     {{ pi.original_name }}
                                 </td>
-                                <td>
+                                <td class="dur-cell">
                                     <input type="number" class="dur-input" data-display="{{ d.id }}" data-item="{{ pi.id }}"
                                            value="{{ pi.duration }}" min="1">
                                     <span style="font-size:12px;color:#999;">s</span>
+                                    {% if pi.content_type == 'gallery' %}
+                                        {% set img_count = gallery_image_counts.get(pi.media_id, 0) %}
+                                        {% if img_count > 0 %}
+                                        <span style="font-size:11px;color:#aaa;display:block;">{{ img_count }} Bilder · ~{{ (pi.duration // img_count) }}s/Bild</span>
+                                        {% endif %}
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <button class="btn btn-sm btn-danger remove-item"
@@ -379,6 +396,21 @@
                         <button type="submit">Hochladen</button>
                     </div>
                 </div>
+            </form>
+        </div>
+        <div class="form-bg">
+            <form method="POST" action="{{ url_for('gallery_create') }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name der Galerie</label>
+                        <input type="text" name="name" placeholder="z.B. Produktbilder" required>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                        <button type="submit">Galerie erstellen</button>
+                    </div>
+                </div>
+                <small style="color:#999;">Bilder werden nach dem Erstellen über den Bibliothek-Eintrag hochgeladen.</small>
             </form>
         </div>
         <div class="form-bg">
@@ -480,6 +512,11 @@
                                     <button type="button" class="btn-sm btn-secondary"
                                             onclick="toggleYtOpts({{ item.id }})">Optionen</button>
                                 {% endif %}
+                                {% if item.content_type == 'gallery' %}
+                                    {% set img_c = gallery_image_counts.get(item.id, 0) %}
+                                    <button type="button" class="btn-sm btn-info"
+                                            onclick="toggleGalleryEditor({{ item.id }})">Bilder ({{ img_c }})</button>
+                                {% endif %}
                                 <form method="POST" action="{{ url_for('delete_media_item', media_id=item.id) }}"
                                       onsubmit="return confirm('&quot;{{ item.original_name }}&quot; wirklich löschen?');">
                                     <button type="submit" class="btn-sm btn-danger">Löschen</button>
@@ -487,6 +524,46 @@
                             </div>
                         </td>
                     </tr>
+                    {% if item.content_type == 'gallery' %}
+                    <tr class="gallery-editor-row" id="gallery-edit-{{ item.id }}" style="display:none;">
+                        <td colspan="6">
+                            {% set gimgs = gallery_images_map.get(item.id, []) %}
+                            <table class="gallery-table" {% if not gimgs %}style="display:none;"{% endif %}>
+                                <tbody class="gallery-sortable" data-gallery="{{ item.id }}">
+                                {% for img in gimgs %}
+                                <tr data-id="{{ img.id }}">
+                                    <td class="gallery-drag-handle">☰</td>
+                                    <td>
+                                        <img src="{{ url_for('serve_upload', filename=img.filename) }}"
+                                             class="gallery-thumb" alt="">
+                                        {{ img.original_name }}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-danger gallery-remove-img"
+                                                data-gallery="{{ item.id }}" data-image="{{ img.id }}">✕</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                            {% if not gimgs %}
+                            <p class="gallery-empty-{{ item.id }}" style="color:#999;font-size:13px;margin-bottom:10px;">Noch keine Bilder.</p>
+                            {% endif %}
+                            <form class="gallery-upload-form" data-gallery="{{ item.id }}" enctype="multipart/form-data">
+                                <div class="form-row" style="align-items:flex-end;">
+                                    <div class="form-group">
+                                        <label>Bilder hochladen (JPG/PNG/GIF/WebP, mehrere möglich)</label>
+                                        <input type="file" name="files" multiple accept=".jpg,.jpeg,.png,.gif,.webp" required>
+                                    </div>
+                                    <div>
+                                        <label>&nbsp;</label>
+                                        <button type="submit">Hochladen</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
                     {% if item.content_type == 'youtube' %}
                     {% set yp = youtube_params.get(item.id, {}) %}
                     <tr class="yt-opts-row" id="yt-opts-{{ item.id }}" style="display:none;">
@@ -674,13 +751,97 @@
         tr.innerHTML =
             '<td class="drag-handle">☰</td>' +
             '<td><span class="badge badge-' + item.content_type + '" style="font-size:10px;">' + item.content_type + '</span> ' + escHtml(item.original_name) + '</td>' +
-            '<td><input type="number" class="dur-input" data-display="' + displayId + '" data-item="' + item.id + '" value="' + item.duration + '" min="1"> <span style="font-size:12px;color:#999;">s</span></td>' +
+            '<td class="dur-cell"><input type="number" class="dur-input" data-display="' + displayId + '" data-item="' + item.id + '" value="' + item.duration + '" min="1"> <span style="font-size:12px;color:#999;">s</span></td>' +
             '<td><button class="btn btn-sm btn-danger remove-item" data-display="' + displayId + '" data-item="' + item.id + '">✕</button></td>';
         return tr;
     }
 
     function escHtml(s) {
         return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Gallery editor toggle
+    function toggleGalleryEditor(id) {
+        var row = document.getElementById('gallery-edit-' + id);
+        row.style.display = row.style.display === 'table-row' ? 'none' : 'table-row';
+    }
+
+    // Gallery image remove
+    document.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('gallery-remove-img')) return;
+        var galleryId = e.target.dataset.gallery;
+        var imageId   = e.target.dataset.image;
+        fetch('/admin/gallery/' + galleryId + '/image/' + imageId + '/remove', {
+            method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (!data.ok) return;
+            var tr = e.target.closest('tr');
+            var tbody = tr.closest('tbody');
+            tr.remove();
+            if (tbody.querySelectorAll('tr').length === 0) {
+                tbody.closest('table').style.display = 'none';
+                var empty = document.querySelector('.gallery-empty-' + galleryId);
+                if (empty) empty.style.display = '';
+            }
+            updateGalleryCount(galleryId, tbody.querySelectorAll('tr').length);
+        });
+    });
+
+    // Gallery SortableJS init
+    document.querySelectorAll('.gallery-sortable').forEach(function(tbody) {
+        Sortable.create(tbody, {
+            handle: '.gallery-drag-handle',
+            animation: 150,
+            onEnd: function() {
+                var galleryId = tbody.dataset.gallery;
+                var ids = Array.from(tbody.querySelectorAll('tr')).map(function(r) { return parseInt(r.dataset.id); });
+                fetch('/admin/gallery/' + galleryId + '/image/reorder', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+                    body: JSON.stringify({order: ids})
+                });
+            }
+        });
+    });
+
+    // Gallery batch upload
+    document.querySelectorAll('.gallery-upload-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var galleryId = form.dataset.gallery;
+            var formData = new FormData(form);
+            fetch('/admin/gallery/' + galleryId + '/upload', {
+                method: 'POST',
+                headers: {'X-Requested-With': 'XMLHttpRequest'},
+                body: formData
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (!data.ok) return;
+                var tbody = document.querySelector('.gallery-sortable[data-gallery="' + galleryId + '"]');
+                data.images.forEach(function(img) { tbody.appendChild(buildGalleryImageRow(galleryId, img)); });
+                tbody.closest('table').style.display = '';
+                var empty = document.querySelector('.gallery-empty-' + galleryId);
+                if (empty) empty.style.display = 'none';
+                updateGalleryCount(galleryId, tbody.querySelectorAll('tr').length);
+                form.reset();
+            });
+        });
+    });
+
+    function buildGalleryImageRow(galleryId, img) {
+        var tr = document.createElement('tr');
+        tr.dataset.id = img.id;
+        tr.innerHTML =
+            '<td class="gallery-drag-handle">☰</td>' +
+            '<td><img src="/uploads/' + escHtml(img.filename) + '" class="gallery-thumb" alt=""> ' + escHtml(img.original_name) + '</td>' +
+            '<td><button class="btn btn-sm btn-danger gallery-remove-img" data-gallery="' + galleryId + '" data-image="' + img.id + '">✕</button></td>';
+        return tr;
+    }
+
+    function updateGalleryCount(galleryId, count) {
+        // Update the "Bilder (N)" button label in the media library row
+        document.querySelectorAll('[onclick="toggleGalleryEditor(' + galleryId + ')"]').forEach(function(btn) {
+            btn.textContent = 'Bilder (' + count + ')';
+        });
     }
 </script>
 </body>

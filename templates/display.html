@@ -196,12 +196,13 @@
                 var result = [];
                 (data.items || []).forEach(function(item) {
                     var dur = Math.max(1, item.duration || 10);
-                    if (item.content_type === 'pdf') {
+                    if (item.content_type === 'pdf' || item.content_type === 'gallery') {
                         var pages = item.pages || [];
                         if (!pages.length) return;
                         var timePerPage = Math.max(1, Math.floor(dur / pages.length));
+                        var slideType = item.content_type === 'pdf' ? 'pdf-page' : 'image';
                         pages.forEach(function(url) {
-                            result.push({ type: 'pdf-page', url: url, duration: timePerPage });
+                            result.push({ type: slideType, url: url, duration: timePerPage });
                         });
                     } else {
                         result.push({
@@ -216,9 +217,10 @@
             // Single-item mode
             var ct = data.content_type;
             var interval = data.cycle_interval || 10;
-            if (ct === 'pdf') {
+            if (ct === 'pdf' || ct === 'gallery') {
+                var slideType = ct === 'pdf' ? 'pdf-page' : 'image';
                 return (data.pages || []).map(function(url) {
-                    return { type: 'pdf-page', url: url, duration: interval };
+                    return { type: slideType, url: url, duration: interval };
                 });
             }
             return [{ type: ct, url: data.url, duration: Infinity,
@@ -232,8 +234,8 @@
                     return (i.content_type || '') + ':' + (i.url || (i.pages && i.pages[0]) || '') + ':' + i.duration;
                 }).join('|');
             }
-            if (data.content_type === 'pdf')
-                return 'pdf:' + data.cycle_interval + ':' + ((data.pages && data.pages[0]) || '');
+            if (data.content_type === 'pdf' || data.content_type === 'gallery')
+                return data.content_type + ':' + data.cycle_interval + ':' + ((data.pages && data.pages[0]) || '');
             return (data.content_type || '') + ':' + (data.url || '');
         }
 
