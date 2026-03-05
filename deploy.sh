@@ -110,10 +110,24 @@ if [ "$SKIP_CONFIG" != "true" ]; then
     read -p "Admin username [admin]: " admin_username
     admin_username=${admin_username:-admin}
 
-    # Generate password hash
+    # Read password securely (never interpolated into shell strings)
     echo ""
+    while true; do
+        read -s -p "Admin password: " admin_password; echo ""
+        read -s -p "Confirm password: " admin_password_confirm; echo ""
+        if [ "$admin_password" = "$admin_password_confirm" ]; then
+            break
+        fi
+        echo -e "${RED}Passwords do not match, try again.${NC}"
+    done
+
+    # Generate password hash — pass via argument, not shell expansion
     echo "Generating password hash..."
-    PASSWORD_HASH=$(python3 "$SCRIPT_DIR/generate_password_hash.py")
+    PASSWORD_HASH=$(python3 -c "
+import bcrypt, sys
+pw = sys.argv[1].encode('utf-8')
+print(bcrypt.hashpw(pw, bcrypt.gensalt()).decode())
+" "$admin_password")
 
     # Generate secret key
     SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
@@ -122,22 +136,20 @@ if [ "$SKIP_CONFIG" != "true" ]; then
     read -p "Server port [8080]: " port
     port=${port:-8080}
 
-    # Update config.json
-    python3 << EOF
-import json
-
-with open('$CONFIG_FILE', 'r') as f:
+    # Update config.json — quoted heredoc + sys.argv avoids all shell-expansion issues
+    python3 - "$admin_username" "$PASSWORD_HASH" "$SECRET_KEY" "$port" "$CONFIG_FILE" << 'PYEOF'
+import json, sys
+username, pw_hash, secret, port, cfg_file = sys.argv[1:6]
+with open(cfg_file, 'r') as f:
     config = json.load(f)
-
-config['admin_username'] = '$admin_username'
-config['admin_password_hash'] = '$PASSWORD_HASH'
-config['secret_key'] = '$SECRET_KEY'
-config['port'] = $port
-
-with open('$CONFIG_FILE', 'w') as f:
+config['admin_username'] = username
+config['admin_password_hash'] = pw_hash
+config['secret_key'] = secret
+config['port'] = int(port)
+with open(cfg_file, 'w') as f:
     json.dump(config, f, indent=2)
     f.write('\n')
-EOF
+PYEOF
 
     echo -e "${GREEN}✓ Configuration file created${NC}"
 fi
