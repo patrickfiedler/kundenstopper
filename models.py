@@ -351,6 +351,14 @@ def delete_media(media_id):
 
 # ---------- pdf renders ----------
 
+def get_pdf_page_count(media_id, display_id):
+    with get_db() as conn:
+        return conn.execute(
+            'SELECT COUNT(*) FROM pdf_renders WHERE media_id = ? AND display_id = ?',
+            (media_id, display_id)
+        ).fetchone()[0]
+
+
 def add_pdf_render(media_id, display_id, page_number, render_filename):
     with get_db() as conn:
         conn.execute(

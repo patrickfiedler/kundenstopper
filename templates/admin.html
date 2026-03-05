@@ -310,7 +310,12 @@
                                     <input type="number" class="dur-input" data-display="{{ d.id }}" data-item="{{ pi.id }}"
                                            value="{{ pi.duration }}" min="1">
                                     <span style="font-size:12px;color:#999;">s</span>
-                                    {% if pi.content_type == 'gallery' %}
+                                    {% if pi.content_type == 'pdf' %}
+                                        {% set page_count = pdf_page_counts.get(d.id, {}).get(pi.media_id, 0) %}
+                                        {% if page_count > 1 %}
+                                        <span style="font-size:11px;color:#aaa;display:block;">{{ page_count }} Seiten · ~{{ (pi.duration // page_count) }}s/Seite</span>
+                                        {% endif %}
+                                    {% elif pi.content_type == 'gallery' %}
                                         {% set img_count = gallery_image_counts.get(pi.media_id, 0) %}
                                         {% if img_count > 0 %}
                                         <span style="font-size:11px;color:#aaa;display:block;">{{ img_count }} Bilder · ~{{ (pi.duration // img_count) }}s/Bild</span>
