@@ -30,45 +30,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
 
 RENDERS_FOLDER = 'renders'
 
-# CSS injected into proxied HTML pages to hide cookie consent banners.
-# Add site-specific selectors here as needed.
-PROXY_COOKIE_HIDE_CSS = """<style>
-/* Cookie consent banner hiding (Phase 1c) */
-/* --- Site-specific --- */
-#cookie-consent, .cookie-consent-container,
-/* --- OneTrust --- */
-#onetrust-banner-sdk, #onetrust-consent-sdk, .onetrust-pc-dark-filter,
-/* --- CookieBot --- */
-#CybotCookiebotDialog, #CybotCookiebotDialogBodyUnderlay, .CybotCookiebotFader,
-/* --- Quantcast --- */
-#qc-cmp2-container,
-/* --- Didomi --- */
-#didomi-host, .didomi-popup-backdrop,
-/* --- CookieConsent.js --- */
-.cc-window, .cc-banner,
-/* --- CookieYes --- */
-.cky-consent-container, .cky-overlay,
-/* --- Borlabs --- */
-#BorlabsCookieBox,
-/* --- TrustArc --- */
-#truste-consent-track,
-/* --- Iubenda --- */
-#iubenda-cs-banner,
-/* --- Osano --- */
-.osano-cm-window,
-/* --- Complianz --- */
-#cmplz-cookiebanner-container,
-/* --- Cookie Law Info / WPML --- */
-#cookie-law-info-bar,
-/* --- Termly --- */
-#termly-code-snippet-support,
-/* --- Generic patterns --- */
-#cookie-notice, .cookie-notice,
-#cookie-banner, .cookie-banner,
-#cookiebanner, .cookiebanner,
-#cookie-overlay, .cookie-overlay
-{ display: none !important; }
-</style>"""
+COOKIE_HIDE_CSS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookie_hide.conf')
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(RENDERS_FOLDER, exist_ok=True)
@@ -298,9 +260,13 @@ def proxy():
 
     ct = resp.headers.get('content-type', 'text/html')
 
-    # For HTML: inject <base href> + cookie-hiding CSS
+    # For HTML: inject <base href> + cookie-hiding CSS (loaded fresh so edits take effect without restart)
     if 'text/html' in ct:
-        inject = f'<base href="{url}">' + PROXY_COOKIE_HIDE_CSS
+        try:
+            cookie_css = f'<style>{open(COOKIE_HIDE_CSS_FILE).read()}</style>'
+        except OSError:
+            cookie_css = ''
+        inject = f'<base href="{url}">' + cookie_css
         html = resp.text
         if re.search(r'<head', html, re.IGNORECASE):
             html = re.sub(r'(<head[^>]*>)', lambda m: m.group(1) + inject,
