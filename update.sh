@@ -115,7 +115,14 @@ else
 fi
 
 if [ "$BEHIND_COUNT" -eq 0 ]; then
-    echo -e "${GREEN}Already up to date. Nothing to do.${NC}"
+    echo -e "${GREEN}Code is already up to date.${NC}"
+    echo ""
+    # Still run migrations and dependency check — they may be pending
+    # even when no new commits were pulled (e.g. after a manual git pull).
+    echo "Running database migrations..."
+    cd "$SCRIPT_DIR" && $PYTHON migrate.py
+    echo ""
+    echo -e "${GREEN}Done.${NC}"
     exit 0
 fi
 
