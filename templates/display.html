@@ -83,7 +83,7 @@
             bottom: 15px;
             right: 15px;
             font-size: 14px;
-            color: rgba(128, 128, 128, 0.5);
+            color: rgba(80, 80, 80, 0.7);
             font-weight: 300;
             display: none;
             user-select: none;
@@ -117,8 +117,10 @@
         #progress-bar-fill {
             height: 100%;
             background: rgba(100, 100, 100, 0.5);
-            width: 0%;
-            transition: width 1s linear;
+            width: 100%;
+            transform: scaleX(0);
+            transform-origin: left center;
+            transition: transform 1s linear;
             border-radius: 2px;
         }
 
@@ -136,13 +138,12 @@
         }
         #progress-container.subtle #progress-bar-bg {
             height: 2px;
-            background: rgba(180, 180, 180, 0.12);
+            background: rgba(150, 150, 150, 0.2);
             border-radius: 0;
         }
         #progress-container.subtle #progress-bar-fill {
-            background: rgba(120, 120, 120, 0.35);
+            background: rgba(80, 80, 80, 0.55);
             border-radius: 0;
-            transition: width 1s linear;
         }
         #progress-container.subtle #page-indicator { display: none; }
     </style>
@@ -302,7 +303,7 @@
             } else if (progressIndicator === 'progress' || progressIndicator === 'subtle') {
                 if (progressIndicator === 'subtle') progressContainer.classList.add('subtle');
                 if (progressIndicator === 'progress') pageIndicator.textContent = (slideIndex + 1) + ' / ' + total;
-                progressBarFill.style.width = ((elapsedSeconds / currentSlideDuration) * 100) + '%';
+                progressBarFill.style.transform = 'scaleX(' + (elapsedSeconds / currentSlideDuration) + ')';
                 countdownDiv.style.display = 'none';
                 progressContainer.style.display = 'block';
             } else {

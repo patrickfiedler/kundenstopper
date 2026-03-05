@@ -1,29 +1,36 @@
 # Go On From Here
 
 ## Last session summary
-Major expansion of Kundenstopper from single-display PDF viewer to multi-display digital signage platform. Phase 1 fully implemented and deployed.
+Implemented Phases 1b through 1e + progress bar improvements. All committed and pushed to main.
 
 ## Current state
-- **Branch:** main, latest commit deployed and working
-- **Tag v1.0** = last pre-expansion commit (PDF-only baseline)
-- **Phase 1 complete** — multi-display, multi-content-type (PDF/image/video/YouTube/URL)
-- **Phase 1b planned but not yet implemented** — website proxy to strip X-Frame-Options headers
+- **Branch:** main, latest commit `4f38bef`
+- **Phase 1 complete** — multi-display, multi-content-type
+- **Phase 1b complete** — website proxy (`/proxy?url=...`), strips X-Frame-Options/CSP
+- **Phase 1c complete** — cookie banner CSS hiding via `cookie_hide.conf`
+- **Phase 1d complete** — scale-to-fit for proxied websites (per-URL opt-in)
+- **Phase 1e complete** — playlist feature (ordered items, per-item duration, per display)
+- **YouTube options** — controls, subtitles, language, related videos configurable per item
+- **Progress bar** — smooth `1s linear` transition + new "Dezenter Balken" (2px subtle) style
 
 ## What to do next
-Phase 1b (website proxy) is complete. Phase 2 (Smart TV) needs hardware for testing.
-See `implementation_plan.md` for Phase 2 details.
+- Phase 2: Smart TV testing (needs hardware)
+- Phase 3: Multi-zone layouts
+- No pending bugs or open PRs
 
 ## Key files
-- `app.py` — all routes, PDF rendering logic
-- `models.py` — DB schema (displays, media_items, pdf_renders, schema_migrations)
-- `migrate.py` — migration runner (reads `migrations/` directory)
-- `migrations/` — numbered .py files, 0001 done
-- `templates/display.html` — display page (no PDF.js, handles all content types natively)
-- `templates/admin.html` — admin UI
+- `app.py` — all routes (proxy, playlist, YouTube options, display API)
+- `models.py` — DB schema + playlist CRUD
+- `migrate.py` — migration runner
+- `migrations/` — 0001–0004 applied
+- `templates/display.html` — unified slide model JS (buildSlides → startSlide)
+- `templates/admin.html` — display cards with playlist panel + YouTube options row
+- `cookie_hide.conf` — CSS selectors for cookie banner hiding (edit without restart)
+- `implementation_plan.md` — phases 1–3 with full spec
 - `deploy.sh` / `update.sh` — deployment scripts
-- `implementation_plan.md` — phases 1, 1b, 2, 3
 
-## Known open issues / decisions
-- Website embedding via proxy (Phase 1b) — ready to implement
-- Smart TV testing (Phase 2) — needs hardware
-- Multi-zone layouts (Phase 3) — future
+## Architecture reminders
+- Playlist takes priority over selected_media_id in display API
+- Proxy whitelist: only registered url-type media items can be proxied
+- cookie_hide.conf read per-request (no restart needed for changes)
+- PDF pre-rendering: pdftoppm → renders/<display_id>/ directory
