@@ -56,5 +56,14 @@ Thumbs.db
 *.zip
 *.tar.gz
 
+# Internal development files
+go_on_from_here.md
+task_plan.md
+implementation_plan.md
+implementation_summary.md
+todo.md
+notes.md
+resume.txt
+
 # Logs
 *.log
